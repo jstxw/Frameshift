@@ -1,9 +1,9 @@
 "use client";
 
 import { EditorTopBar } from "@/components/editor/EditorTopBar";
-import { EditorSidebar } from "@/components/editor/EditorSidebar";
 import { EditorCanvas } from "@/components/editor/EditorCanvas";
 import { EditorTimeline } from "@/components/editor/EditorTimeline";
+import { EditToolbar } from "@/components/editor/EditToolbar";
 import { Toast } from "@/components/editor/Toast";
 import { useEditorState } from "@/hooks/useEditorState";
 import { useEffect, useRef } from "react";
@@ -73,6 +73,8 @@ export default function EditorPage() {
           isDetecting={editor.isDetecting}
           isSegmenting={editor.isSegmenting}
           maskCount={editor.maskCount}
+          maskVersion={editor.maskVersion}
+          editVersion={editor.editVersion}
           selectedObjectId={editor.selectedObjectId}
           editMode={editor.editMode}
           editParams={editor.editParams}
@@ -80,11 +82,24 @@ export default function EditorPage() {
           zoom={editor.zoom}
           currentFrame={editor.currentFrame}
           totalFrames={editor.frames.length}
+          frameWidth={editor.frameWidth}
+          frameHeight={editor.frameHeight}
           onSelectObject={editor.selectObject}
           onUpload={editor.loadVideo}
           onApplyEdit={editor.applyEditAction}
+          onSegmentAtPoint={editor.segmentAtPoint}
         />
 
+        <EditToolbar
+          objectLabel={
+            editor.selectedObjectId
+              ? editor.detections.find((d) => d.id === editor.selectedObjectId)?.label || "object"
+              : "selection"
+          }
+          active={!editor.isSegmenting && editor.maskCount > 0}
+          onApply={editor.applyEditAction}
+          onClose={editor.closeEditPanel}
+        />
       </div>
 
       <EditorTimeline

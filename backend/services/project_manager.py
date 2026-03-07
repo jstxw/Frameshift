@@ -1,8 +1,19 @@
 import uuid
 import json
+import threading
 from pathlib import Path
 
 BASE_DIR = Path("/tmp/frameshift")
+
+_locks: dict[str, threading.Lock] = {}
+_locks_lock = threading.Lock()
+
+def _get_lock(project_id: str) -> threading.Lock:
+    with _locks_lock:
+        if project_id not in _locks:
+            _locks[project_id] = threading.Lock()
+        return _locks[project_id]
+
 
 def create_project() -> dict:
     project_id = str(uuid.uuid4())[:8]
@@ -33,19 +44,28 @@ def _status_path(project_id: str) -> Path:
 
 def _write_status(project_id: str, data: dict):
     path = _status_path(project_id)
-    path.write_text(json.dumps(data))
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(path)
 
 def update_status(project_id: str, **kwargs):
-    path = _status_path(project_id)
-    if path.exists():
-        data = json.loads(path.read_text())
-    else:
-        data = {}
-    data.update(kwargs)
-    path.write_text(json.dumps(data))
+    lock = _get_lock(project_id)
+    with lock:
+        path = _status_path(project_id)
+        if path.exists():
+            data = json.loads(path.read_text())
+        else:
+            data = {}
+        data.update(kwargs)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data))
+        tmp.replace(path)
 
 def get_status(project_id: str) -> dict:
     path = _status_path(project_id)
     if not path.exists():
         return {"status": "not_found"}
-    return json.loads(path.read_text())
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return {"status": "loading"}

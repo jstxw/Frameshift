@@ -62,11 +62,12 @@ const COLOR_PRESETS = [
 
 interface EditToolbarProps {
   objectLabel: string;
+  active: boolean;
   onApply: (action: EditAction, params: { color?: string; prompt?: string; scale?: number }) => void;
   onClose: () => void;
 }
 
-export function EditToolbar({ objectLabel, onApply, onClose }: EditToolbarProps) {
+export function EditToolbar({ objectLabel, active, onApply, onClose }: EditToolbarProps) {
   const [selected, setSelected] = useState<EditOption | null>(null);
   const [color, setColor] = useState("#F43F5E");
   const [prompt, setPrompt] = useState("");
@@ -76,7 +77,7 @@ export function EditToolbar({ objectLabel, onApply, onClose }: EditToolbarProps)
   const frameEdits = EDIT_OPTIONS.filter((o) => o.category === "frame");
 
   const handleApply = () => {
-    if (!selected) return;
+    if (!selected || !active) return;
     onApply(selected.id, {
       color: selected.needsColor ? color.replace("#", "") : undefined,
       prompt: selected.needsPrompt ? prompt : undefined,
@@ -86,30 +87,35 @@ export function EditToolbar({ objectLabel, onApply, onClose }: EditToolbarProps)
 
   return (
     <div
-      className="absolute right-4 top-4 z-30 w-[280px] bg-[#111827]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-slide-in-right"
+      className="w-[220px] shrink-0 bg-[#111827]/95 backdrop-blur-xl border-l border-white/10 flex flex-col overflow-y-auto"
       onClick={(e) => e.stopPropagation()}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-[var(--accent)]" />
-          <span className="text-white/90 text-sm font-medium">{objectLabel}</span>
+          <div className={`w-2 h-2 rounded-full transition-colors ${active ? "bg-[var(--accent)]" : "bg-white/20"}`} />
+          <span className={`text-sm font-medium transition-colors ${active ? "text-white/90" : "text-white/30"}`}>
+            {active ? objectLabel : "No selection"}
+          </span>
         </div>
-        <button onClick={onClose} className="text-white/30 hover:text-white/70 transition-colors">
-          <X className="w-4 h-4" />
-        </button>
+        {active && (
+          <button onClick={onClose} className="text-white/30 hover:text-white/70 transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Option grid or param input */}
       {!selected ? (
         <div className="p-3">
-          <p className="text-white/30 text-[10px] uppercase tracking-wider font-medium mb-2 px-1">Object</p>
+          <p className={`text-[10px] uppercase tracking-wider font-medium mb-2 px-1 transition-colors ${active ? "text-white/30" : "text-white/15"}`}>Object</p>
           <div className="grid grid-cols-3 gap-1.5 mb-3">
             {objectEdits.map((opt) => {
               const Icon = opt.icon;
               return (
                 <button
                   key={opt.id}
+                  disabled={!active}
                   onClick={() => {
                     if (!opt.needsColor && !opt.needsPrompt && !opt.needsScale) {
                       onApply(opt.id, {});
@@ -117,22 +123,27 @@ export function EditToolbar({ objectLabel, onApply, onClose }: EditToolbarProps)
                       setSelected(opt);
                     }
                   }}
-                  className="flex flex-col items-center gap-1.5 py-2.5 px-1 rounded-xl text-white/50 hover:text-white hover:bg-white/5 transition-all group"
+                  className={`flex flex-col items-center gap-1.5 py-2.5 px-1 rounded-xl transition-all group ${
+                    active
+                      ? "text-white/50 hover:text-white hover:bg-white/5 cursor-pointer"
+                      : "text-white/15 cursor-not-allowed"
+                  }`}
                 >
-                  <Icon className="w-4 h-4 group-hover:text-[var(--accent)] transition-colors" />
+                  <Icon className={`w-4 h-4 transition-colors ${active ? "group-hover:text-[var(--accent)]" : ""}`} />
                   <span className="text-[10px] font-medium">{opt.label}</span>
                 </button>
               );
             })}
           </div>
 
-          <p className="text-white/30 text-[10px] uppercase tracking-wider font-medium mb-2 px-1">Whole Frame</p>
+          <p className={`text-[10px] uppercase tracking-wider font-medium mb-2 px-1 transition-colors ${active ? "text-white/30" : "text-white/15"}`}>Whole Frame</p>
           <div className="grid grid-cols-3 gap-1.5">
             {frameEdits.map((opt) => {
               const Icon = opt.icon;
               return (
                 <button
                   key={opt.id}
+                  disabled={!active}
                   onClick={() => {
                     if (!opt.needsColor && !opt.needsPrompt && !opt.needsScale) {
                       onApply(opt.id, {});
@@ -140,9 +151,13 @@ export function EditToolbar({ objectLabel, onApply, onClose }: EditToolbarProps)
                       setSelected(opt);
                     }
                   }}
-                  className="flex flex-col items-center gap-1.5 py-2.5 px-1 rounded-xl text-white/50 hover:text-white hover:bg-white/5 transition-all group"
+                  className={`flex flex-col items-center gap-1.5 py-2.5 px-1 rounded-xl transition-all group ${
+                    active
+                      ? "text-white/50 hover:text-white hover:bg-white/5 cursor-pointer"
+                      : "text-white/15 cursor-not-allowed"
+                  }`}
                 >
-                  <Icon className="w-4 h-4 group-hover:text-[var(--accent)] transition-colors" />
+                  <Icon className={`w-4 h-4 transition-colors ${active ? "group-hover:text-[var(--accent)]" : ""}`} />
                   <span className="text-[10px] font-medium">{opt.label}</span>
                 </button>
               );

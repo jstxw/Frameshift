@@ -207,41 +207,38 @@ class EditRequest(BaseModel):
     edit_rules: List[EditRule]
 
 async def _background_edit(project_id: str, edit_rules: List[EditRule]):
-    """Background task: upload frames, apply edit rules, track progress in status.json."""
+    """Background task: upload only the needed frames, apply edits, download results."""
     try:
         project_dir = project_manager.get_project_dir(project_id)
         frames_dir = project_dir / "frames"
         masks_dir = project_dir / "masks"
-        edited_dir = project_dir / "edited"
-        edited_dir.mkdir(exist_ok=True)
 
-        frame_files = sorted(frames_dir.glob("frame_*.jpg"))
+        # Collect unique frame indices to edit
+        frames_to_edit: set[int] = set()
+        for rule in edit_rules:
+            for i in range(rule.start_frame, rule.end_frame + 1):
+                frames_to_edit.add(i)
+
+        total = len(frames_to_edit)
+        project_manager.update_status(project_id, edit_status="uploading", edit_progress={"done": 0, "total": total})
+
+        # Upload only the frames we need
+        frame_ids: dict[int, str] = {}
+        for idx in sorted(frames_to_edit):
+            frame_path = frames_dir / f"frame_{idx:04d}.jpg"
+            if not frame_path.exists():
+                continue
+            result = cloudinary_service.upload_file(str(frame_path), folder=f"frameshift/{project_id}/frames")
+            frame_ids[idx] = result["public_id"]
+
+        # Upload mask for the first frame if it exists (SAM 2 produces one mask per segment)
+        mask_id = ""
         mask_files = sorted(masks_dir.glob("mask_*.png"))
-        total_frames = len(frame_files)
-
-        project_manager.update_status(
-            project_id,
-            edit_status="uploading",
-            edit_progress={"done": 0, "total": total_frames},
-        )
-
-        # Upload all frames to Cloudinary
-        frame_ids = {}
-        for f in frame_files:
-            result = cloudinary_service.upload_file(str(f), folder=f"frameshift/{project_id}/frames")
-            frame_ids[f.name] = result["public_id"]
-
-        # Upload masks if they exist
-        mask_ids = {}
-        for m in mask_files:
-            result = cloudinary_service.upload_file(str(m), folder=f"frameshift/{project_id}/masks")
-            mask_ids[m.name] = result["public_id"]
-
-        # Compute mask bbox for positioning edits
         bbox_x, bbox_y, bbox_w, bbox_h = 0, 0, 0, 0
         if mask_files:
+            result = cloudinary_service.upload_file(str(mask_files[0]), folder=f"frameshift/{project_id}/masks")
+            mask_id = result["public_id"]
             from PIL import Image
-            import numpy as np
             anchor_mask = np.array(Image.open(mask_files[0]))
             rows = np.any(anchor_mask > 0, axis=1)
             cols = np.any(anchor_mask > 0, axis=0)
@@ -251,100 +248,78 @@ async def _background_edit(project_id: str, edit_rules: List[EditRule]):
                 bbox_x, bbox_y = int(x_min), int(y_min)
                 bbox_w, bbox_h = int(x_max - x_min), int(y_max - y_min)
 
-        frame_list = sorted(frame_ids.keys())
-        mask_list = sorted(mask_ids.keys())
-
-        frames_to_edit = set()
-        for rule in edit_rules:
-            for i in range(rule.start_frame, min(rule.end_frame + 1, total_frames + 1)):
-                frames_to_edit.add(i)
-
         project_manager.update_status(project_id, edit_status="editing")
         completed = 0
 
-        async def process_frame(index):
-            nonlocal completed
-            frame_name = frame_list[index - 1]
-            f_id = frame_ids[frame_name]
-            m_id = mask_ids.get(mask_list[index - 1], "") if index - 1 < len(mask_list) else ""
+        for idx in sorted(frames_to_edit):
+            f_id = frame_ids.get(idx)
+            if not f_id:
+                completed += 1
+                continue
 
-            if index not in frames_to_edit:
-                shutil.copy2(str(frames_dir / frame_name), str(edited_dir / f"frame_{index:04d}.jpg"))
-            else:
-                url = None
-                for rule in edit_rules:
-                    if rule.start_frame <= index <= rule.end_frame:
-                        t = rule.edit_type
+            url = None
+            for rule in edit_rules:
+                if rule.start_frame <= idx <= rule.end_frame:
+                    t = rule.edit_type
 
-                        # ── Core edits (use SAM 2 mask) ──
-                        if t == "recolor" and m_id:
-                            url = await cloudinary_service.apply_recolor(f_id, m_id, rule.color, rule.prompt)
-                        elif t == "resize" and m_id:
-                            url = await cloudinary_service.apply_resize(f_id, m_id, bbox_x, bbox_y, bbox_w, bbox_h, rule.scale)
-                        elif t == "replace" and m_id:
-                            url = await cloudinary_service.apply_replace(f_id, m_id, rule.prompt or "object")
-                        elif t == "delete" and m_id:
-                            url = await cloudinary_service.apply_delete(f_id, m_id)
-                        elif t == "add":
-                            url = await cloudinary_service.apply_add(
-                                f_id, rule.prompt or "object",
-                                rule.asset_x or bbox_x, rule.asset_y or bbox_y,
-                                rule.asset_w or bbox_w, rule.asset_h or bbox_h,
-                            )
-                        elif t == "blur_region" and m_id:
-                            url = await cloudinary_service.apply_blur_region(f_id, m_id)
+                    # ── Core edits (use SAM 2 mask) ──
+                    if t == "recolor" and mask_id:
+                        url = await cloudinary_service.apply_recolor(f_id, mask_id, rule.color, rule.prompt)
+                    elif t == "resize" and mask_id:
+                        url = await cloudinary_service.apply_resize(f_id, mask_id, bbox_x, bbox_y, bbox_w, bbox_h, rule.scale)
+                    elif t == "replace" and mask_id:
+                        url = await cloudinary_service.apply_replace(f_id, mask_id, rule.prompt or "object")
+                    elif t == "delete" and mask_id:
+                        url = await cloudinary_service.apply_delete(f_id, mask_id)
+                    elif t == "add":
+                        url = await cloudinary_service.apply_add(
+                            f_id, rule.prompt or "object",
+                            rule.asset_x or bbox_x, rule.asset_y or bbox_y,
+                            rule.asset_w or bbox_w, rule.asset_h or bbox_h,
+                        )
+                    elif t == "blur_region" and mask_id:
+                        url = await cloudinary_service.apply_blur_region(f_id, mask_id)
 
-                        # ── Whole-frame edits (no mask needed) ──
-                        elif t == "bg_remove":
-                            url = await cloudinary_service.apply_background_remove(f_id)
-                        elif t == "bg_replace":
-                            url = await cloudinary_service.apply_background_replace(f_id, rule.prompt or "studio background")
-                        elif t == "gen_fill":
-                            url = await cloudinary_service.apply_generative_fill(f_id, rule.prompt)
-                        elif t == "enhance":
-                            url = await cloudinary_service.apply_enhance(f_id)
-                        elif t == "upscale":
-                            url = await cloudinary_service.apply_upscale(f_id)
-                        elif t == "restore":
-                            url = await cloudinary_service.apply_restore(f_id)
-                        elif t == "blur":
-                            url = await cloudinary_service.apply_blur(f_id, rule.blur_strength or 500)
-                        elif t == "drop_shadow":
-                            url = await cloudinary_service.apply_drop_shadow(f_id)
-                        elif t == "gen_recolor":
-                            url = await cloudinary_service.apply_generative_recolor(f_id, rule.prompt or "object", rule.color or "FF0000")
+                    # ── Whole-frame edits (no mask needed) ──
+                    elif t == "bg_remove":
+                        url = await cloudinary_service.apply_background_remove(f_id)
+                    elif t == "bg_replace":
+                        url = await cloudinary_service.apply_background_replace(f_id, rule.prompt or "studio background")
+                    elif t == "gen_fill":
+                        url = await cloudinary_service.apply_generative_fill(f_id, rule.prompt)
+                    elif t == "enhance":
+                        url = await cloudinary_service.apply_enhance(f_id)
+                    elif t == "upscale":
+                        url = await cloudinary_service.apply_upscale(f_id)
+                    elif t == "restore":
+                        url = await cloudinary_service.apply_restore(f_id)
+                    elif t == "blur":
+                        url = await cloudinary_service.apply_blur(f_id, rule.blur_strength or 500)
+                    elif t == "drop_shadow":
+                        url = await cloudinary_service.apply_drop_shadow(f_id)
+                    elif t == "gen_recolor":
+                        url = await cloudinary_service.apply_generative_recolor(f_id, rule.prompt or "object", rule.color or "FF0000")
 
-                        break
+                    break
 
-                save_path = edited_dir / f"frame_{index:04d}.jpg"
-                if url:
-                    await cloudinary_service.download_url(url, save_path)
-                else:
-                    shutil.copy2(str(frames_dir / frame_name), str(save_path))
+            # Download the edited frame back, overwriting the original
+            if url:
+                save_path = frames_dir / f"frame_{idx:04d}.jpg"
+                await cloudinary_service.download_url(url, save_path)
 
             completed += 1
-            project_manager.update_status(
-                project_id,
-                edit_progress={"done": completed, "total": total_frames},
-            )
+            project_manager.update_status(project_id, edit_progress={"done": completed, "total": total})
 
-        batch_size = 20
-        for i in range(0, total_frames, batch_size):
-            batch = [process_frame(j + 1) for j in range(i, min(i + batch_size, total_frames))]
-            await asyncio.gather(*batch)
-
-        project_manager.update_status(
-            project_id,
-            edit_status="done",
-            edit_progress={"done": total_frames, "total": total_frames},
-        )
+        project_manager.update_status(project_id, edit_status="done", edit_progress={"done": total, "total": total})
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         project_manager.update_status(project_id, edit_status="error", edit_error=str(e))
 
 
 @app.post("/edit")
-async def edit_frames(req: EditRequest, background_tasks: BackgroundTasks):
+async def edit_frames(req: EditRequest):
     project_dir = project_manager.get_project_dir(req.project_id)
     if not any((project_dir / "frames").glob("frame_*.jpg")):
         return {"error": "No frames found. Run /extract first."}
@@ -354,7 +329,8 @@ async def edit_frames(req: EditRequest, background_tasks: BackgroundTasks):
         edit_status="uploading",
         edit_progress={"done": 0, "total": 0},
     )
-    background_tasks.add_task(_background_edit, req.project_id, req.edit_rules)
+    # Run as a proper async task instead of BackgroundTasks (which can't await)
+    asyncio.ensure_future(_background_edit(req.project_id, req.edit_rules))
     return {"project_id": req.project_id, "edit_status": "uploading"}
 
 

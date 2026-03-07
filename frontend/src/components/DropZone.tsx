@@ -23,14 +23,7 @@ export function DropZone() {
     const res = await fetch(`${API_URL}/upload`, { method: "POST", body: formData });
     const data = await res.json();
 
-    setStatus("Extracting frames...");
-    await fetch(`${API_URL}/extract`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project_id: data.project_id }),
-    });
-
-    // Redirect immediately — editor will poll for readiness
+    // Redirect immediately — editor will kick off extract and poll for readiness
     router.push(`/editor/${data.project_id}`);
   }
 
@@ -56,6 +49,7 @@ export function DropZone() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) uploadFile(file);
+    if (e.target) e.target.value = "";
   };
 
   const handleUploadClick = () => fileInputRef.current?.click();

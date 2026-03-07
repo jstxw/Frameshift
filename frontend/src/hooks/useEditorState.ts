@@ -31,6 +31,8 @@ interface EditorState {
   isDetecting: boolean;
   isSegmenting: boolean;
   maskCount: number;
+  maskVersion: number;
+  editVersion: number;
   selectedObjectId: string | null;
   editMode: EditMode | null;
   editParams: EditParams;
@@ -65,6 +67,8 @@ export function useEditorState(projectId?: string) {
     isDetecting: false,
     isSegmenting: false,
     maskCount: 0,
+    maskVersion: 0,
+    editVersion: 0,
     selectedObjectId: null,
     editMode: null,
     editParams: DEFAULT_EDIT_PARAMS,
@@ -82,10 +86,22 @@ export function useEditorState(projectId?: string) {
   useEffect(() => {
     if (!projectId) return;
 
+    const extractTriggered = { current: false };
+
     const poll = async () => {
       try {
         const res = await fetch(`${API_URL}/project/${projectId}/status`);
         const status = await res.json();
+
+        // Kick off extraction if project was just uploaded
+        if ((status.status === "created" || status.status === "processing") && !extractTriggered.current) {
+          extractTriggered.current = true;
+          fetch(`${API_URL}/extract`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ project_id: projectId }),
+          });
+        }
 
         if (status.status === "ready" || status.status === "extracting") {
           const frameCount = status.frame_count || 0;
@@ -159,6 +175,56 @@ export function useEditorState(projectId?: string) {
     // They run automatically during /extract
   }, [state.projectId]);
 
+  const segmentAtPoint = useCallback((clickX: number, clickY: number) => {
+    setState((s) => {
+      if (!s.projectId) return s;
+
+      fetch(`${API_URL}/segment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: s.projectId,
+          frame_index: s.currentFrame + 1,
+          click_x: clickX,
+          click_y: clickY,
+        }),
+      }).then(() => {
+        // Clear any existing polling, then start fresh
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+        const poll = async () => {
+          try {
+            const res = await fetch(`${API_URL}/project/${s.projectId}/status`);
+            const status = await res.json();
+            setState((prev) => ({
+              ...prev,
+              isSegmenting: !!status.segmenting,
+              maskCount: status.mask_count || 0,
+              maskVersion: prev.maskVersion + ((status.mask_count || 0) > 0 && !status.segmenting ? 1 : 0),
+            }));
+            if (!status.segmenting && status.segment_status === "done") {
+              if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+              }
+            }
+          } catch { /* keep polling */ }
+        };
+        pollingRef.current = setInterval(poll, 1500);
+      });
+
+      return {
+        ...s,
+        isSegmenting: true,
+        maskCount: 0,
+        selectedObjectId: null,
+        showEditPanel: false,
+      };
+    });
+  }, []);
+
   const selectObject = useCallback((id: string | null) => {
     setState((s) => {
       // Trigger segmentation when selecting an object
@@ -179,27 +245,30 @@ export function useEditorState(projectId?: string) {
               click_y: clickY,
             }),
           }).then(() => {
-            // Restart polling to track segmentation progress
-            if (!pollingRef.current) {
-              const poll = async () => {
-                try {
-                  const res = await fetch(`${API_URL}/project/${s.projectId}/status`);
-                  const status = await res.json();
-                  setState((prev) => ({
-                    ...prev,
-                    isSegmenting: !!status.segmenting,
-                    maskCount: status.mask_count || 0,
-                  }));
-                  if (!status.segmenting && status.segment_status === "done") {
-                    if (pollingRef.current) {
-                      clearInterval(pollingRef.current);
-                      pollingRef.current = null;
-                    }
-                  }
-                } catch { /* ignore */ }
-              };
-              pollingRef.current = setInterval(poll, 1500);
+            // Clear any existing polling, then start fresh
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
             }
+            const poll = async () => {
+              try {
+                const res = await fetch(`${API_URL}/project/${s.projectId}/status`);
+                const status = await res.json();
+                setState((prev) => ({
+                  ...prev,
+                  isSegmenting: !!status.segmenting,
+                  maskCount: status.mask_count || 0,
+                  maskVersion: prev.maskVersion + ((status.mask_count || 0) > 0 && !status.segmenting ? 1 : 0),
+                }));
+                if (!status.segmenting && status.segment_status === "done") {
+                  if (pollingRef.current) {
+                    clearInterval(pollingRef.current);
+                    pollingRef.current = null;
+                  }
+                }
+              } catch { /* ignore */ }
+            };
+            pollingRef.current = setInterval(poll, 1500);
           });
         }
       }
@@ -258,7 +327,11 @@ export function useEditorState(projectId?: string) {
             edit_rules: [editRule],
           }),
         }).then(() => {
-          // Poll for edit completion
+          // Clear any existing polling, then poll for edit completion
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
           const pollEdit = async () => {
             try {
               const res = await fetch(`${API_URL}/project/${s.projectId}/status`);
@@ -267,6 +340,7 @@ export function useEditorState(projectId?: string) {
                 setState((prev) => ({
                   ...prev,
                   isProcessing: false,
+                  editVersion: prev.editVersion + 1,
                   showToast: true,
                   toastMessage: status.edit_status === "done"
                     ? `${action} applied successfully`
@@ -279,9 +353,7 @@ export function useEditorState(projectId?: string) {
               }
             } catch { /* keep polling */ }
           };
-          if (!pollingRef.current) {
-            pollingRef.current = setInterval(pollEdit, 1500);
-          }
+          pollingRef.current = setInterval(pollEdit, 1500);
         });
 
         return { ...s, isProcessing: true, selectedObjectId: null, showEditPanel: false };
@@ -333,6 +405,7 @@ export function useEditorState(projectId?: string) {
     selectedObject,
     loadVideo,
     detectObjects,
+    segmentAtPoint,
     selectObject,
     setEditMode,
     updateEditParams,
