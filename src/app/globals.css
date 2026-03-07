@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+/* ─── Design Tokens ─── */
+:root {
+  --bg: #ffffff;
+  --bg-subtle: #f9fafb;
+  --fg: #171717;
+  --fg-muted: #6b7280;
+  --fg-subtle: #9ca3af;
+  --accent: #f43f5e;
+  --accent-hover: #e11d48;
+  --surface-dark: #111827;
+  --surface-darker: #1f2937;
+  --border: #d1d5db;
+  --border-dark: #374151;
+}
+
+/* ─── Base ─── */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  color: var(--fg);
+  background: var(--bg);
+}
+
+/* ─── Animations ─── */
+
+/* 1. Logo Intro (Clipabit exact) */
+@keyframes logo-intro {
+  0% {
+    opacity: 0;
+    filter: blur(2px);
+    transform: translateY(-8px) scale(0.92) rotate(-2deg);
+  }
+  60% {
+    opacity: 1;
+    filter: blur(0.4px);
+    transform: translateY(2px) scale(1.02) rotate(0.5deg);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0px);
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+/* 2. Fade Up */
+@keyframes fade-up {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 3. Scroll Ticker (Clipabit exact) */
+@keyframes scroll-ticker {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+/* 4. Drop Zone Pulse */
+@keyframes pulse-border {
+  0%,
+  100% {
+    border-color: var(--accent);
+    opacity: 1;
+  }
+  50% {
+    border-color: var(--accent);
+    opacity: 0.5;
+  }
+}
+
+/* ─── Animation Utility Classes ─── */
+.animate-logo-intro {
+  opacity: 0;
+  filter: blur(2px);
+  transform: translateY(-8px) scale(0.92) rotate(-2deg);
+  animation: logo-intro 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.12s forwards;
+}
+
+.animate-fade-up {
+  opacity: 0;
+  animation: fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-scroll-ticker {
+  will-change: transform;
+  backface-visibility: hidden;
+  contain: layout style paint;
+  animation: scroll-ticker 20s linear infinite;
+}
+
+.animate-pulse-border {
+  border-style: solid;
+  border-color: var(--accent);
+  animation: pulse-border 1.5s ease-in-out infinite;
+}
+
+/* Stagger delays */
+.stagger-1 { animation-delay: 0.2s; }
+.stagger-2 { animation-delay: 0.4s; }
+.stagger-3 { animation-delay: 0.6s; }
+.stagger-4 { animation-delay: 0.8s; }
+.stagger-5 { animation-delay: 1.0s; }
+
+/* ─── Reduced Motion ─── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
