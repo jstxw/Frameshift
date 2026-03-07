@@ -1,8 +1,14 @@
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
+from pydantic import BaseModel
+import shutil
+
+from services import cloudinary_service, project_manager
 
 load_dotenv()
+cloudinary_service.configure()
 
 app = FastAPI(title="FrameShift AI")
 
@@ -20,45 +26,21 @@ async def health():
     return {"status": "ok"}
 
 
-@app.post("/analyze-frame")
-async def analyze_frame(file: UploadFile = File(...)):
-    """Run YOLOv8 object detection on a single frame."""
-    from ultralytics import YOLO
+# --- Upload ---
 
-    import tempfile
-    import os
+@app.post("/upload")
+async def upload_video(file: UploadFile = File(...)):
+    project = project_manager.create_project()
+    project_dir = project_manager.get_project_dir(project["project_id"])
 
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
+    video_path = project_dir / "original.mp4"
+    with open(video_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
 
-    try:
-        model = YOLO("yolov8n.pt")
-        results = model(tmp_path)
-        detections = []
-        for r in results:
-            for box in r.boxes:
-                detections.append({
-                    "label": r.names[int(box.cls[0])],
-                    "confidence": float(box.conf[0]),
-                    "bbox": box.xyxy[0].tolist(),
-                })
-        return {"objects": detections}
-    finally:
-        os.unlink(tmp_path)
+    result = cloudinary_service.upload_file(str(video_path), resource_type="video")
 
-
-@app.post("/segment")
-async def segment_frame(frame_id: str, x: int, y: int):
-    """Run SAM 2 segmentation at a point. Placeholder for SAM 2 integration."""
     return {
-        "frame_id": frame_id,
-        "point": [x, y],
-        "mask": "TODO: integrate SAM 2",
+        "project_id": project["project_id"],
+        "video_url": result["url"],
+        "public_id": result["public_id"],
     }
-
-
-@app.post("/render")
-async def render_video(background_tasks: BackgroundTasks):
-    """Trigger FFmpeg render. Placeholder for video processing pipeline."""
-    return {"status": "TODO: implement FFmpeg render pipeline"}
