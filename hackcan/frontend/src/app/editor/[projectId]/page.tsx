@@ -165,16 +165,10 @@ export default function EditorPage() {
 
   const scaleX = canvasSize.width / imageSize.width;
   const scaleY = canvasSize.height / imageSize.height;
-  const isReady = projectStatus?.status === "ready";
 
   // Loading state while frames are being extracted
-  if (!isReady) {
-    const statusText =
-      projectStatus?.status === "extracting"
-        ? "Extracting frames from video..."
-        : projectStatus?.status === "processing"
-          ? "Processing video..."
-          : "Loading project...";
+  if (!projectReady) {
+    const statusText = loadingStatus;
 
     return (
       <div className="flex min-h-screen flex-col bg-black text-white">
