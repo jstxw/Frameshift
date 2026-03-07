@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 import shutil
 
-from services import cloudinary_service, project_manager
+from services import cloudinary_service, project_manager, ffmpeg_service
 
 load_dotenv()
 cloudinary_service.configure()
@@ -44,3 +44,28 @@ async def upload_video(file: UploadFile = File(...)):
         "video_url": result["url"],
         "public_id": result["public_id"],
     }
+
+
+# --- Extract ---
+
+class ExtractRequest(BaseModel):
+    project_id: str
+
+@app.post("/extract")
+async def extract_frames(req: ExtractRequest):
+    project_dir = project_manager.get_project_dir(req.project_id)
+    video_path = project_dir / "original.mp4"
+    frames_dir = project_dir / "frames"
+
+    frame_count = ffmpeg_service.extract_frames(video_path, frames_dir)
+
+    return {"project_id": req.project_id, "frame_count": frame_count}
+
+
+@app.get("/frame/{project_id}/{frame_index}")
+async def get_frame(project_id: str, frame_index: int):
+    project_dir = project_manager.get_project_dir(project_id)
+    frame_path = project_dir / "frames" / f"frame_{frame_index:04d}.jpg"
+    if not frame_path.exists():
+        return {"error": "Frame not found"}
+    return FileResponse(frame_path, media_type="image/jpeg")
