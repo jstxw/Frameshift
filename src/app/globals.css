@@ -347,6 +347,68 @@ a {
   transition: all 300ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* ─── Editor Animations ─── */
+@keyframes slide-in-right {
+  0% { transform: translateX(100%); opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slide-out-right {
+  0% { transform: translateX(0); opacity: 1; }
+  100% { transform: translateX(100%); opacity: 0; }
+}
+
+@keyframes detection-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes progress-bar {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
+
+@keyframes toast-in {
+  0% { transform: translateY(16px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes toast-out {
+  0% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(16px); opacity: 0; }
+}
+
+@keyframes bbox-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 300ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-slide-out-right {
+  animation: slide-out-right 200ms ease-in forwards;
+}
+
+.animate-detection-shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgba(244,63,94,0.15) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: detection-shimmer 1s linear infinite;
+}
+
+.animate-progress-bar {
+  animation: progress-bar 2s linear forwards;
+}
+
+.animate-toast-in {
+  animation: toast-in 400ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-bbox-pulse {
+  animation: bbox-pulse 1.5s ease-in-out infinite;
+}
+
 /* ─── Reduced Motion ─── */
 @media (prefers-reduced-motion: reduce) {
   *,
