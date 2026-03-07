@@ -1,7 +1,6 @@
 "use client";
 
 import { FeatureCard } from "./FeatureCard";
-import { ScrollTicker } from "./ScrollTicker";
 import { useInView } from "@/hooks/useInView";
 
 const FEATURES = [
@@ -37,7 +36,7 @@ export function BentoGrid() {
 
   return (
     <section>
-      <div className="px-6 md:px-12 lg:px-24 pb-12">
+      <div className="px-6 md:px-12 lg:px-24 pt-24 pb-12">
         {/* Heading */}
         <div ref={headingRef} className="text-center mb-12">
           <h2
@@ -46,8 +45,16 @@ export function BentoGrid() {
             }`}
           >
             Edit{" "}
-            <span className="inline-block font-bold text-[var(--accent)] px-1 py-0.5 rounded-sm">
-              anything
+            <span className="keyword-highlight">
+              {"anything".split("").map((letter, i) => (
+                <span
+                  key={i}
+                  className="wave-letter"
+                  style={{ animationDelay: `${i * 0.08}s` }}
+                >
+                  {letter}
+                </span>
+              ))}
             </span>{" "}
             in frame.
           </h2>
@@ -72,8 +79,6 @@ export function BentoGrid() {
         </div>
       </div>
 
-      {/* Scroll Ticker */}
-      <ScrollTicker />
     </section>
   );
 }

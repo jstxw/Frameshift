@@ -2,7 +2,7 @@ import { Play } from "lucide-react";
 
 export function DemoVideo() {
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-[1440px] mx-auto">
       {/* Video Frame */}
       <div className="relative aspect-video bg-[var(--surface-dark)] rounded-2xl overflow-hidden">
         <button
