@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
@@ -53,15 +53,36 @@ async def upload_video(file: UploadFile = File(...)):
 class ExtractRequest(BaseModel):
     project_id: str
 
-@app.post("/extract")
-async def extract_frames(req: ExtractRequest):
-    project_dir = project_manager.get_project_dir(req.project_id)
+def _background_extract_and_detect(project_id: str):
+    """Background task: extract frames and run YOLO on all."""
+    project_dir = project_manager.get_project_dir(project_id)
     video_path = project_dir / "original.mp4"
     frames_dir = project_dir / "frames"
 
+    # Extract frames
+    project_manager.update_status(project_id, status="extracting")
     frame_count = ffmpeg_service.extract_frames(video_path, frames_dir)
+    project_manager.update_status(project_id, status="detecting", frame_count=frame_count)
 
-    return {"project_id": req.project_id, "frame_count": frame_count}
+    # Run YOLO on all frames
+    detections = {}
+    frame_files = sorted(frames_dir.glob("frame_*.jpg"))
+    for i, f in enumerate(frame_files, start=1):
+        dets = yolo_service.detect(f)
+        detections[str(i)] = dets
+
+    project_manager.update_status(project_id, status="ready", detections=detections)
+
+@app.post("/extract")
+async def extract_frames(req: ExtractRequest, background_tasks: BackgroundTasks):
+    project_manager.update_status(req.project_id, status="processing")
+    background_tasks.add_task(_background_extract_and_detect, req.project_id)
+    return {"project_id": req.project_id, "status": "processing"}
+
+
+@app.get("/project/{project_id}/status")
+async def get_project_status(project_id: str):
+    return project_manager.get_status(project_id)
 
 
 @app.get("/frame/{project_id}/{frame_index}")
