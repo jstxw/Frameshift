@@ -44,13 +44,13 @@ export function HowItWorks() {
       {/* Steps */}
       <div
         ref={stepsRef}
-        className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-4 items-start"
+        className="max-w-4xl mx-auto flex flex-col md:flex-row items-center md:items-start justify-center gap-8 md:gap-0"
       >
         {STEPS.map((step, i) => (
-          <div key={step.number} className="flex items-start gap-4 md:gap-0 md:flex-col">
+          <div key={step.number} className="flex items-center md:items-start gap-4 md:gap-0">
             {/* Step card */}
             <div
-              className={`flex-1 text-center ${
+              className={`text-center flex-1 md:px-6 ${
                 stepsInView ? "animate-fade-up" : "opacity-0"
               }`}
               style={{
@@ -78,10 +78,10 @@ export function HowItWorks() {
               </p>
             </div>
 
-            {/* Arrow (hidden on last step and mobile) */}
+            {/* Arrow between steps (hidden on last step and mobile) */}
             {i < STEPS.length - 1 && (
               <div
-                className={`hidden md:flex items-center justify-center self-center mt-8 ${
+                className={`hidden md:flex items-center justify-center shrink-0 mt-12 ${
                   stepsInView ? "animate-fade-up" : "opacity-0"
                 }`}
                 style={{
