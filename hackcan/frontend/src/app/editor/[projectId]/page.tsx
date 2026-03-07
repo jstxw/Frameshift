@@ -57,8 +57,12 @@ export default function EditorPage() {
   );
 
   useEffect(() => {
+    fetch(`${API_URL}/project/${projectId}/status`)
+      .then((r) => r.json())
+      .then((d) => { if (d.frame_count > 0) setFrameCount(d.frame_count); })
+      .catch(() => {});
     loadFrame(1);
-  }, [loadFrame]);
+  }, [loadFrame, projectId]);
 
   async function handleCanvasClick(e: any) {
     const stage = e.target.getStage();
