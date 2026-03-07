@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 import shutil
 
-from services import cloudinary_service, project_manager, ffmpeg_service
+from services import cloudinary_service, project_manager, ffmpeg_service, yolo_service
 
 load_dotenv()
 cloudinary_service.configure()
@@ -69,3 +69,21 @@ async def get_frame(project_id: str, frame_index: int):
     if not frame_path.exists():
         return {"error": "Frame not found"}
     return FileResponse(frame_path, media_type="image/jpeg")
+
+
+# --- Detect ---
+
+class DetectRequest(BaseModel):
+    project_id: str
+    frame_index: int
+
+@app.post("/detect")
+async def detect_objects(req: DetectRequest):
+    project_dir = project_manager.get_project_dir(req.project_id)
+    frame_path = project_dir / "frames" / f"frame_{req.frame_index:04d}.jpg"
+
+    if not frame_path.exists():
+        return {"error": "Frame not found"}
+
+    detections = yolo_service.detect(frame_path)
+    return {"project_id": req.project_id, "frame_index": req.frame_index, "objects": detections}
