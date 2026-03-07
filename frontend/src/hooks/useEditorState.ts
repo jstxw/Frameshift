@@ -233,16 +233,62 @@ export function useEditorState(projectId?: string) {
   );
 
   const applyEdit = useCallback(() => {
-    setState((s) => ({ ...s, isProcessing: true }));
-    setTimeout(() => {
-      setState((s) => ({
-        ...s,
-        isProcessing: false,
-        showToast: true,
-        toastMessage: `Edit applied to ${s.applyToAllFrames ? "all 150 frames" : "current frame"}`,
-      }));
-    }, 2000);
+    // Legacy — kept for interface compat
   }, []);
+
+  const applyEditAction = useCallback(
+    (action: string, params: { color?: string; prompt?: string; scale?: number }) => {
+      setState((s) => {
+        if (!s.projectId) return s;
+
+        const editRule: Record<string, unknown> = {
+          edit_type: action,
+          start_frame: s.currentFrame + 1,
+          end_frame: s.currentFrame + 1,
+        };
+        if (params.color) editRule.color = params.color;
+        if (params.prompt) editRule.prompt = params.prompt;
+        if (params.scale) editRule.scale = params.scale;
+
+        fetch(`${API_URL}/edit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: s.projectId,
+            edit_rules: [editRule],
+          }),
+        }).then(() => {
+          // Poll for edit completion
+          const pollEdit = async () => {
+            try {
+              const res = await fetch(`${API_URL}/project/${s.projectId}/status`);
+              const status = await res.json();
+              if (status.edit_status === "done" || status.edit_status === "error") {
+                setState((prev) => ({
+                  ...prev,
+                  isProcessing: false,
+                  showToast: true,
+                  toastMessage: status.edit_status === "done"
+                    ? `${action} applied successfully`
+                    : `Edit failed: ${status.edit_error || "unknown error"}`,
+                }));
+                if (pollingRef.current) {
+                  clearInterval(pollingRef.current);
+                  pollingRef.current = null;
+                }
+              }
+            } catch { /* keep polling */ }
+          };
+          if (!pollingRef.current) {
+            pollingRef.current = setInterval(pollEdit, 1500);
+          }
+        });
+
+        return { ...s, isProcessing: true, selectedObjectId: null, showEditPanel: false };
+      });
+    },
+    []
+  );
 
   const setCurrentFrame = useCallback((frame: number) => {
     setState((s) => ({ ...s, currentFrame: frame }));
@@ -291,6 +337,7 @@ export function useEditorState(projectId?: string) {
     setEditMode,
     updateEditParams,
     applyEdit,
+    applyEditAction,
     setCurrentFrame,
     togglePlay,
     setZoom,

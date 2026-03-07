@@ -2,6 +2,7 @@
 
 import type { Detection, EditMode, EditParams } from "@/lib/mock-data";
 import { BoundingBox } from "./BoundingBox";
+import { EditToolbar, type EditAction } from "./EditToolbar";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -18,8 +19,10 @@ interface EditorCanvasProps {
   isProcessing: boolean;
   zoom: number;
   currentFrame: number;
+  totalFrames: number;
   onSelectObject: (id: string | null) => void;
   onUpload: () => void;
+  onApplyEdit: (action: EditAction, params: { color?: string; prompt?: string; scale?: number }) => void;
 }
 
 export function EditorCanvas({
@@ -35,8 +38,10 @@ export function EditorCanvas({
   isProcessing,
   zoom,
   currentFrame,
+  totalFrames,
   onSelectObject,
   onUpload,
+  onApplyEdit,
 }: EditorCanvasProps) {
   if (!videoLoaded) {
     return <EmptyCanvas onUpload={onUpload} />;
@@ -108,15 +113,20 @@ export function EditorCanvas({
               onClick={() => onSelectObject(det.id)}
             />
           ))}
-
-          {selectedObjectId && editMode && (
-            <EditPreviewOverlay
-              detection={detections.find((d) => d.id === selectedObjectId)!}
-              editMode={editMode}
-              editParams={editParams}
-            />
-          )}
         </div>
+
+        {/* Edit toolbar — appears after object is selected and segmented */}
+        {selectedObjectId && !isSegmenting && maskCount > 0 && (() => {
+          const det = detections.find((d) => d.id === selectedObjectId);
+          if (!det) return null;
+          return (
+            <EditToolbar
+              objectLabel={det.label}
+              onApply={onApplyEdit}
+              onClose={() => onSelectObject(null)}
+            />
+          );
+        })()}
       </div>
     </div>
   );
@@ -145,63 +155,3 @@ function EmptyCanvas({ onUpload }: { onUpload: () => void }) {
   );
 }
 
-function EditPreviewOverlay({
-  detection,
-  editMode,
-  editParams,
-}: {
-  detection: Detection;
-  editMode: EditMode;
-  editParams: EditParams;
-}) {
-  const [x, y, w, h] = detection.bbox;
-
-  if (editMode === "recolor") {
-    return (
-      <div
-        className="absolute pointer-events-none z-5 rounded-sm transition-all duration-300"
-        style={{
-          left: `${x}%`,
-          top: `${y}%`,
-          width: `${w}%`,
-          height: `${h}%`,
-          backgroundColor: editParams.recolor.color,
-          opacity: editParams.recolor.opacity * 0.4,
-          mixBlendMode: "overlay",
-        }}
-      />
-    );
-  }
-
-  if (editMode === "resize") {
-    return (
-      <div
-        className="absolute border-2 border-dashed border-blue-400/60 pointer-events-none z-5 rounded-sm transition-all duration-300"
-        style={{
-          left: `${x - (w * (editParams.resize.scale - 1)) / 2}%`,
-          top: `${y - (h * (editParams.resize.scale - 1)) / 2}%`,
-          width: `${w * editParams.resize.scale}%`,
-          height: `${h * editParams.resize.scale}%`,
-        }}
-      />
-    );
-  }
-
-  if (editMode === "replace") {
-    return (
-      <div
-        className="absolute pointer-events-none z-5 rounded-sm border-2 border-dashed border-emerald-400/60 flex items-center justify-center transition-all duration-300"
-        style={{
-          left: `${x}%`,
-          top: `${y}%`,
-          width: `${w}%`,
-          height: `${h}%`,
-        }}
-      >
-        <span className="text-emerald-400/80 text-[9px] font-medium">REPLACE</span>
-      </div>
-    );
-  }
-
-  return null;
-}

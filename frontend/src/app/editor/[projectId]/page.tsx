@@ -66,14 +66,6 @@ export default function EditorPage() {
       />
 
       <div className="flex-1 flex overflow-hidden">
-        <EditorSidebar
-          videoLoaded={editor.videoLoaded}
-          isDetecting={editor.isDetecting}
-          onUpload={editor.loadVideo}
-          onDetect={editor.detectObjects}
-          onEditClick={() => {}}
-        />
-
         <EditorCanvas
           projectId={projectId}
           videoLoaded={editor.videoLoaded}
@@ -87,8 +79,10 @@ export default function EditorPage() {
           isProcessing={editor.isProcessing}
           zoom={editor.zoom}
           currentFrame={editor.currentFrame}
+          totalFrames={editor.frames.length}
           onSelectObject={editor.selectObject}
           onUpload={editor.loadVideo}
+          onApplyEdit={editor.applyEditAction}
         />
 
       </div>
