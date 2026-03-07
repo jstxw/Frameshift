@@ -12,6 +12,13 @@ _image_predictor = None
 _video_predictor = None
 
 
+def reset_predictors():
+    """Call after switching checkpoints to force reload."""
+    global _image_predictor, _video_predictor
+    _image_predictor = None
+    _video_predictor = None
+
+
 def _get_device():
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -22,12 +29,12 @@ def _get_device():
 
 def _get_checkpoint_and_config():
     base_dir = Path(__file__).resolve().parent.parent
-    checkpoint = str(base_dir / "checkpoints" / "sam2_hiera_large.pt")
-    config = "sam2_hiera_l.yaml"
+    checkpoint = str(base_dir / "checkpoints" / "sam2_hiera_tiny.pt")
+    config = "sam2_hiera_t.yaml"
     return checkpoint, config
 
 
-def get_predictor():
+def get_image_predictor():
     """Get SAM2 image predictor for single-frame segmentation."""
     global _image_predictor
     if _image_predictor is None:
@@ -54,17 +61,14 @@ def get_video_predictor():
 
 
 def segment_frame(frame_path: Path, click_x: int, click_y: int) -> np.ndarray:
-    """Segment a single frame at a click point. Returns binary mask."""
-    predictor = get_predictor()
+    """Segment object at click point in a single frame. Returns best mask."""
+    predictor = get_image_predictor()
     image = np.array(Image.open(frame_path).convert("RGB"))
     predictor.set_image(image)
 
-    input_point = np.array([[click_x, click_y]])
-    input_label = np.array([1])
-
     masks, scores, _ = predictor.predict(
-        point_coords=input_point,
-        point_labels=input_label,
+        point_coords=np.array([[click_x, click_y]]),
+        point_labels=np.array([1]),
         multimask_output=True,
     )
     return masks[np.argmax(scores)]
@@ -77,15 +81,16 @@ def propagate_masks(
     masks_dir: Path,
     click_x: int = None,
     click_y: int = None,
-    frame_step: int = 1,
+    frame_step: int = 10,
 ) -> int:
     """
-    Propagate segmentation masks across all video frames using SAM 2 video predictor.
+    Propagate segmentation masks across video frames using SAM 2 video predictor.
 
     frame_step: process every Nth frame for speed. Frames in between get the
                 nearest propagated mask. Set to 1 for full quality.
     """
     masks_dir.mkdir(parents=True, exist_ok=True)
+
     frame_files = sorted(frames_dir.glob("frame_*.jpg"))
 
     if not frame_files or click_x is None or click_y is None:
@@ -104,7 +109,6 @@ def propagate_masks(
     selected_indices = sorted(selected_indices)
 
     # Create temp dir with symlinks named <number>.jpg for SAM 2
-    # Map: sam2_frame_idx -> original_frame_idx
     with tempfile.TemporaryDirectory() as tmp_dir:
         idx_map = {}  # sam2 index -> original index
         reverse_map = {}  # original index -> sam2 index
@@ -123,7 +127,6 @@ def propagate_masks(
         )
         predictor.reset_state(inference_state)
 
-        # Scale click coordinates if needed (SAM 2 handles normalization internally)
         points = np.array([[click_x, click_y]], dtype=np.float32)
         labels = np.array([1], np.int32)
 
@@ -143,7 +146,7 @@ def propagate_masks(
             orig_idx = idx_map[frame_idx]
             propagated[orig_idx] = (mask_logits[0] > 0.0).cpu().numpy().squeeze()
 
-        # Backward propagation (if anchor isn't the first selected frame)
+        # Backward propagation
         if sam2_anchor > 0:
             for frame_idx, obj_ids, mask_logits in predictor.propagate_in_video(
                 inference_state, reverse=True
@@ -158,7 +161,6 @@ def propagate_masks(
         if i in propagated:
             mask_data = propagated[i]
         else:
-            # Find nearest propagated frame
             nearest = min(propagated_indices, key=lambda x: abs(x - i))
             mask_data = propagated[nearest]
         mask_img = (mask_data.astype(np.uint8)) * 255
