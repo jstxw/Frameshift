@@ -119,6 +119,9 @@ results = model("frame.jpg")
 
 SAM 2 (Segment Anything Model 2) is Meta's video segmentation model. This is the core of FrameShift.
 
+Sam2 is installed via pytorch - open source framework to build and run ai models
+yolov8 and sam 2 both run on pytorch via however many dimension tensors 
+
 SAM 2 takes a point or bounding box on a frame as input, and returns a precise pixel-level mask for the object — and then tracks that mask forward and backward across video frames.
 
 **This is exactly your use case.** The user clicks a bottle. SAM 2 segments the bottle with a pixel mask. You now know exactly which pixels are the bottle in every frame.
