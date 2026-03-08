@@ -40,6 +40,46 @@ def create_project() -> dict:
 
     return {"project_id": project_id, "project_dir": str(project_dir)}
 
+def reset_stuck_projects():
+    """Reset any projects with stuck processing statuses (e.g. from a server restart)."""
+    if not BASE_DIR.exists():
+        return
+    stuck_fields = {
+        "ai_edit_status": (["processing"], "idle"),
+        "edit_status": (["uploading", "editing"], "idle"),
+        "refine_status": (["processing"], "idle"),
+    }
+    reset_values = {
+        "ai_edit_phase": None,
+        "ai_edit_progress": {"done": 0, "total": 0},
+        "ai_interpolation_progress": {"done": 0, "total": 0},
+        "edit_progress": {"done": 0, "total": 0},
+        "detecting": False,
+        "segmenting": False,
+    }
+    for project_dir in BASE_DIR.iterdir():
+        if not project_dir.is_dir():
+            continue
+        status_path = project_dir / "status.json"
+        if not status_path.exists():
+            continue
+        try:
+            data = json.loads(status_path.read_text())
+            changed = False
+            for field, (stuck_values, reset_to) in stuck_fields.items():
+                if data.get(field) in stuck_values:
+                    data[field] = reset_to
+                    changed = True
+            if changed:
+                data.update(reset_values)
+                tmp = status_path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(data))
+                tmp.replace(status_path)
+                print(f"[Startup] Reset stuck project: {project_dir.name}")
+        except Exception:
+            pass
+
+
 def get_project_dir(project_id: str) -> Path:
     project_dir = BASE_DIR / project_id
     if not project_dir.exists():

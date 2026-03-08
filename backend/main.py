@@ -30,6 +30,11 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def startup():
+    project_manager.reset_stuck_projects()
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
