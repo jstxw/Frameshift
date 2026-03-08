@@ -17,6 +17,7 @@ interface EditorCanvasProps {
   maskCount: number;
   maskVersion: number;
   editVersion: number;
+  transformedFrameVersions?: { [frameIndex: number]: number };
   selectedObjectId: string | null;
   editMode: EditMode | null;
   editParams: EditParams;
@@ -43,6 +44,7 @@ export function EditorCanvas({
   maskCount,
   maskVersion,
   editVersion,
+  transformedFrameVersions,
   selectedObjectId,
   editMode,
   editParams,
@@ -85,10 +87,13 @@ export function EditorCanvas({
   }
 
   // Show preview frame if in preview mode, otherwise show current frame
+  // Use per-frame versioning for transformed frames, otherwise use global editVersion
+  const currentFrameIndex = currentFrame + 1; // Backend uses 1-based indexing
+  const frameVersion = transformedFrameVersions?.[currentFrameIndex] ?? editVersion;
   const frameUrl = aiEditStatus === "preview" && previewFrameUrl
     ? previewFrameUrl
     : projectId
-    ? `${API_URL}/frame/${projectId}/${currentFrame + 1}?v=${editVersion}`
+    ? `${API_URL}/frame/${projectId}/${currentFrameIndex}?v=${frameVersion}`
     : null;
 
   return (

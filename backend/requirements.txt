@@ -59,3 +59,7 @@ typing_extensions==4.15.0
 ultralytics==8.4.21
 ultralytics-thop==2.0.18
 urllib3==2.6.3
+
+# FILM frame interpolation (optional - falls back to linear if not installed)
+# tensorflow>=2.5.0
+# tensorflow-hub>=0.12.0

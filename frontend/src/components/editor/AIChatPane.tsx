@@ -150,16 +150,17 @@ export function AIChatPane({
           <div className="flex gap-2">
             <button
               onClick={onAccept}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-all"
+              disabled={aiEditStatus === "applying"}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
                 background: "var(--accent)",
                 color: "#fff",
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
+              onMouseEnter={(e) => !e.currentTarget.disabled && (e.currentTarget.style.opacity = "0.9")}
               onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
             >
               <Check className="w-3.5 h-3.5" />
-              Accept
+              {aiEditStatus === "applying" ? "Applying..." : "Accept"}
             </button>
             <button
               onClick={onReject}

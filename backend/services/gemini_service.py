@@ -36,7 +36,10 @@ def _get_client():
 
 async def edit_frame(frame_path: Path, prompt: str) -> bytes:
     """Send a frame image + text prompt to Gemini and return the edited image bytes."""
-    try:
+    import asyncio
+    
+    def _generate_sync():
+        """Synchronous wrapper for the Gemini API call."""
         client = _get_client()
 
         # Read frame as bytes
@@ -79,6 +82,12 @@ async def edit_frame(frame_path: Path, prompt: str) -> bytes:
                     response_modalities=["TEXT", "IMAGE"],
                 ),
             )
+        return response
+    
+    try:
+        # Run the synchronous API call in a thread pool to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, _generate_sync)
 
         # Check for errors in response
         if not response.candidates or len(response.candidates) == 0:
@@ -134,7 +143,10 @@ async def edit_frame_with_reference(frame_path: Path, prompt: str, reference_fra
     Returns:
         Edited image bytes
     """
-    try:
+    import asyncio
+    
+    def _generate_sync():
+        """Synchronous wrapper for the Gemini API call."""
         client = _get_client()
 
         # Read target frame as bytes
@@ -185,6 +197,12 @@ async def edit_frame_with_reference(frame_path: Path, prompt: str, reference_fra
                     response_modalities=["TEXT", "IMAGE"],
                 ),
             )
+        return response
+    
+    try:
+        # Run the synchronous API call in a thread pool to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, _generate_sync)
 
         # Check for errors in response
         if not response.candidates or len(response.candidates) == 0:

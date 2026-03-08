@@ -34,6 +34,7 @@ interface EditorState {
   maskCount: number;
   maskVersion: number;
   editVersion: number;
+  transformedFrameVersions?: { [frameIndex: number]: number }; // Per-frame versioning for changed frames
   selectedObjectId: string | null;
   editMode: EditMode | null;
   editParams: EditParams;
@@ -96,17 +97,51 @@ export function useEditorState(projectId?: string) {
   });
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const acceptInProgressRef = useRef<boolean>(false);
 
-  // Poll backend for project status when projectId is provided
+  // Unified polling for project status - single interval, handles all status updates
   useEffect(() => {
     if (!projectId) return;
 
     const extractTriggered = { current: false };
+    let lastAIProgressDone = 0;
+    const startTime = Date.now();
+    const MAX_POLL_TIME = 300000; // 5 minutes max polling time
 
     const poll = async () => {
       try {
+        // Stop polling if we've been polling too long
+        if (Date.now() - startTime > MAX_POLL_TIME) {
+          console.warn("Polling timeout - stopping status checks");
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+          setState((s) => ({
+            ...s,
+            showToast: true,
+            toastMessage: "Video processing timed out. Please check your FFmpeg installation.",
+          }));
+          return;
+        }
+
         const res = await fetch(`${API_URL}/project/${projectId}/status`);
         const status = await res.json();
+
+        // Stop polling if there's an error
+        if (status.status === "error") {
+          console.error("Extraction error:", status.error);
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+          setState((s) => ({
+            ...s,
+            showToast: true,
+            toastMessage: `Extraction failed: ${status.error || "Unknown error"}`,
+          }));
+          return;
+        }
 
         // Kick off extraction if project was just uploaded
         if ((status.status === "created" || status.status === "processing") && !extractTriggered.current) {
@@ -142,25 +177,59 @@ export function useEditorState(projectId?: string) {
               setState((s) => ({ ...s, allDetections: status.detections }));
             }
 
-            // Update AI edit status
+            // Update AI edit status and progress
             if (status.ai_edit_status !== undefined) {
+              const aiProgress = status.ai_edit_progress || { done: 0, total: 0 };
+              const isDone = status.ai_edit_status === "done" || status.ai_edit_status === "error";
+              const transformedFrames = status.ai_edit_transformed_frames || [];
+              
+              // Track transformed frames for per-frame versioning
+              // This allows us to only refresh frames that were actually changed
+              if (isDone && transformedFrames.length > 0) {
+                lastAIProgressDone = aiProgress.total; // Mark as processed
+                setState((s) => ({
+                  ...s,
+                  transformedFrameVersions: {
+                    ...(s.transformedFrameVersions || {}),
+                    ...Object.fromEntries(transformedFrames.map((f: number) => [f, (s.transformedFrameVersions?.[f] || 0) + 1]))
+                  }
+                }));
+              }
+              
               setState((s) => ({
                 ...s,
                 aiEditStatus: status.ai_edit_status === "processing" ? "applying" : 
                              status.ai_edit_status === "done" ? "done" : 
                              status.ai_edit_status === "preview" ? "preview" : 
                              status.ai_edit_status === "error" ? "idle" : s.aiEditStatus,
-                aiPreviewFrameUrl: status.ai_preview_url ? `${API_URL}${status.ai_preview_url}` : s.aiPreviewFrameUrl,
-                aiGenerationId: status.ai_generation_id || s.aiGenerationId,
+                aiPreviewFrameUrl: isDone ? null : (status.ai_preview_url ? `${API_URL}${status.ai_preview_url}` : s.aiPreviewFrameUrl),
+                aiGenerationId: isDone ? null : (status.ai_generation_id || s.aiGenerationId),
+                showToast: isDone ? true : s.showToast,
+                toastMessage: isDone ? (status.ai_edit_status === "done"
+                  ? "AI edit applied successfully"
+                  : `AI edit failed: ${status.ai_edit_error || "unknown error"}`) : s.toastMessage,
               }));
+
+              if (isDone) {
+                acceptInProgressRef.current = false;
+              }
             }
 
-            // Stop polling once ready, not detecting, and not segmenting
-            if (status.status === "ready" && !status.detecting && !status.segmenting) {
+            // Continue polling if AI edit is processing, otherwise stop when ready
+            const shouldStopPolling = status.status === "ready" && 
+                                     !status.detecting && 
+                                     !status.segmenting && 
+                                     status.ai_edit_status !== "processing" &&
+                                     status.ai_edit_status !== "applying";
+            
+            if (shouldStopPolling) {
               if (pollingRef.current) {
                 clearInterval(pollingRef.current);
                 pollingRef.current = null;
               }
+            } else if (!pollingRef.current) {
+              // Restart polling if it was stopped but we need it again
+              pollingRef.current = setInterval(poll, 2000);
             }
           }
         }
@@ -169,8 +238,15 @@ export function useEditorState(projectId?: string) {
       }
     };
 
+    // Clear any existing polling first
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+
     poll();
-    pollingRef.current = setInterval(poll, 1500);
+    // Use longer interval - 2000ms instead of 1500ms, and only poll when needed
+    pollingRef.current = setInterval(poll, 2000);
 
     return () => {
       if (pollingRef.current) {
@@ -208,41 +284,17 @@ export function useEditorState(projectId?: string) {
     setState((s) => {
       if (!s.projectId) return s;
 
-      fetch(`${API_URL}/segment`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project_id: s.projectId,
-          frame_index: s.currentFrame + 1,
-          click_x: clickX,
-          click_y: clickY,
-        }),
-      }).then(() => {
-        // Clear any existing polling, then start fresh
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
-        }
-        const poll = async () => {
-          try {
-            const res = await fetch(`${API_URL}/project/${s.projectId}/status`);
-            const status = await res.json();
-            setState((prev) => ({
-              ...prev,
-              isSegmenting: !!status.segmenting,
-              maskCount: status.mask_count || 0,
-              maskVersion: prev.maskVersion + ((status.mask_count || 0) > 0 && !status.segmenting ? 1 : 0),
-            }));
-            if (!status.segmenting && status.segment_status === "done") {
-              if (pollingRef.current) {
-                clearInterval(pollingRef.current);
-                pollingRef.current = null;
-              }
-            }
-          } catch { /* keep polling */ }
-        };
-        pollingRef.current = setInterval(poll, 1500);
-      });
+      // Segmentation disabled - no-op
+      // fetch(`${API_URL}/segment`, {
+      //   method: "POST",
+      //   headers: { "Content-Type": "application/json" },
+      //   body: JSON.stringify({
+      //     project_id: s.projectId,
+      //     frame_index: s.currentFrame + 1,
+      //     click_x: clickX,
+      //     click_y: clickY,
+      //   }),
+      // });
 
       return {
         ...s,
@@ -264,41 +316,7 @@ export function useEditorState(projectId?: string) {
           const clickX = Math.round(((xPct + wPct / 2) / 100) * s.frameWidth);
           const clickY = Math.round(((yPct + hPct / 2) / 100) * s.frameHeight);
 
-          fetch(`${API_URL}/segment`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              project_id: s.projectId,
-              frame_index: s.currentFrame + 1,
-              click_x: clickX,
-              click_y: clickY,
-            }),
-          }).then(() => {
-            // Clear any existing polling, then start fresh
-            if (pollingRef.current) {
-              clearInterval(pollingRef.current);
-              pollingRef.current = null;
-            }
-            const poll = async () => {
-              try {
-                const res = await fetch(`${API_URL}/project/${s.projectId}/status`);
-                const status = await res.json();
-                setState((prev) => ({
-                  ...prev,
-                  isSegmenting: !!status.segmenting,
-                  maskCount: status.mask_count || 0,
-                  maskVersion: prev.maskVersion + ((status.mask_count || 0) > 0 && !status.segmenting ? 1 : 0),
-                }));
-                if (!status.segmenting && status.segment_status === "done") {
-                  if (pollingRef.current) {
-                    clearInterval(pollingRef.current);
-                    pollingRef.current = null;
-                  }
-                }
-              } catch { /* ignore */ }
-            };
-            pollingRef.current = setInterval(poll, 1500);
-          });
+          // Segmentation disabled - no-op
         }
       }
 
@@ -358,35 +376,8 @@ export function useEditorState(projectId?: string) {
             project_id: s.projectId,
             edit_rules: [editRule],
           }),
-        }).then(() => {
-          // Clear any existing polling, then poll for edit completion
-          if (pollingRef.current) {
-            clearInterval(pollingRef.current);
-            pollingRef.current = null;
-          }
-          const pollEdit = async () => {
-            try {
-              const res = await fetch(`${API_URL}/project/${s.projectId}/status`);
-              const status = await res.json();
-              if (status.edit_status === "done" || status.edit_status === "error") {
-                setState((prev) => ({
-                  ...prev,
-                  isProcessing: false,
-                  editVersion: prev.editVersion + 1,
-                  showToast: true,
-                  toastMessage: status.edit_status === "done"
-                    ? `${action} applied successfully`
-                    : `Edit failed: ${status.edit_error || "unknown error"}`,
-                }));
-                if (pollingRef.current) {
-                  clearInterval(pollingRef.current);
-                  pollingRef.current = null;
-                }
-              }
-            } catch { /* keep polling */ }
-          };
-          pollingRef.current = setInterval(pollEdit, 1500);
         });
+        // Status polling will handle edit completion via unified poll
 
         return { ...s, isProcessing: true, selectedObjectId: null, showEditPanel: false };
       });
@@ -512,62 +503,82 @@ export function useEditorState(projectId?: string) {
   }, []);
 
   const acceptAIGeneration = useCallback(() => {
+    // Use ref to prevent duplicate calls (faster than state check)
+    if (acceptInProgressRef.current) {
+      console.log("Accept already in progress (ref check), ignoring duplicate call");
+      return;
+    }
+
     setState((s) => {
-      if (!s.projectId || !s.aiGenerationId) return s;
+      if (!s.projectId || !s.aiGenerationId) {
+        console.log("Cannot accept: missing projectId or generationId");
+        return s;
+      }
+      // Prevent multiple calls - if already applying, ignore
+      if (s.aiEditStatus === "applying") {
+        console.log("Already applying, ignoring duplicate accept call");
+        return s;
+      }
+
+      // Set ref immediately to prevent race conditions
+      acceptInProgressRef.current = true;
 
       const startFrame = s.editRangeStart > 0 ? s.editRangeStart + 1 : s.currentFrame + 1;
       const endFrame = s.editRangeEnd > 0 ? s.editRangeEnd + 1 : s.frames.length;
-      const interval = 30; // Apply to every 30th frame
+      const interval = 60; // Transform every 60th frame from start to end
 
+      const generationId = s.aiGenerationId; // Save before clearing
+
+      // Set status immediately to prevent duplicate calls and clear generation ID
+      setState((prev) => ({
+        ...prev,
+        aiEditStatus: "applying",
+        aiPreviewFrameUrl: null, // Clear preview when starting to apply
+        aiGenerationId: null, // Clear generation ID to prevent duplicate calls
+      }));
+
+      console.log("Calling accept with generation_id:", generationId);
       fetch(`${API_URL}/ai/edit/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id: s.projectId,
-          generation_id: s.aiGenerationId,
+          generation_id: generationId, // Use saved generation ID
           start_frame: startFrame,
           end_frame: endFrame,
           interval: interval,
         }),
-      }).then(() => {
+      }).then((res) => {
+        if (!res.ok) {
+          const errorData = res.json().catch(() => ({}));
+          throw new Error(`Accept failed: ${res.status}`);
+        }
+        return res.json();
+      }).then((data) => {
+        if (data.error) {
+          console.error("Accept error from backend:", data.error);
+          setState((prev) => ({
+            ...prev,
+            aiEditStatus: "idle",
+            showToast: true,
+            toastMessage: data.error,
+          }));
+          return;
+        }
+        console.log("Accept started successfully");
+        // Unified polling will handle status updates - no need for separate polling
+      }).catch((err) => {
+        acceptInProgressRef.current = false; // Reset ref on error
+        console.error("Accept error:", err);
         setState((prev) => ({
           ...prev,
-          aiEditStatus: "applying",
-          aiPreviewFrameUrl: null, // Clear preview when starting to apply
+          aiEditStatus: "idle",
+          showToast: true,
+          toastMessage: `Failed to accept: ${err.message}`,
         }));
-
-        // Poll for completion
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
-        }
-        const pollAIEdit = async () => {
-          try {
-            const res = await fetch(`${API_URL}/project/${s.projectId}/status`);
-            const status = await res.json();
-            if (status.ai_edit_status === "done" || status.ai_edit_status === "error") {
-              setState((prev) => ({
-                ...prev,
-                aiEditStatus: status.ai_edit_status === "done" ? "done" : "idle",
-                aiPreviewFrameUrl: null, // Clear preview after applying
-                aiGenerationId: null,
-                editVersion: prev.editVersion + 1,
-                showToast: true,
-                toastMessage: status.ai_edit_status === "done"
-                  ? "AI edit applied successfully"
-                  : `AI edit failed: ${status.ai_edit_error || "unknown error"}`,
-              }));
-              if (pollingRef.current) {
-                clearInterval(pollingRef.current);
-                pollingRef.current = null;
-              }
-            }
-          } catch { /* keep polling */ }
-        };
-        pollingRef.current = setInterval(pollAIEdit, 1500);
       });
 
-      return { ...s, aiEditStatus: "applying" };
+      return s;
     });
   }, []);
 

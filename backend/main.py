@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 from services import cloudinary_service, project_manager, ffmpeg_service, yolo_service, sam2_service, gemini_service, rife_service
+# film_service  # FILM disabled - using RIFE instead
 
 load_dotenv()
 cloudinary_service.configure()
@@ -425,7 +426,7 @@ class AIAcceptRequest(BaseModel):
     generation_id: str
     start_frame: int
     end_frame: int
-    interval: int = 60  # Not used - only start and end frames are transformed
+    interval: int = 60  # Transform every Nth frame between start and end
 
 class AIRejectRequest(BaseModel):
     project_id: str
@@ -618,14 +619,20 @@ async def _background_ai_edit(
     end_frame: int,
     interval: int,
 ):
-    """Background task: Apply AI transformation to start and end frames only."""
+    """Background task: Apply AI transformation to start frame, every Nth frame, and end frame."""
     try:
         project_dir = project_manager.get_project_dir(project_id)
         frames_dir = project_dir / "frames"
         
-        # Only transform the start and end frames
-        key_frames = [start_frame]
-        if end_frame != start_frame:
+        # Calculate frames to transform: start frame, then every Nth frame, then end frame
+        key_frames = [start_frame]  # Always include start frame
+        
+        # Add every Nth frame between start and end (default: every 60th frame)
+        for i in range(start_frame + interval, end_frame, interval):
+            key_frames.append(i)
+        
+        # Always include end frame if it's different from start
+        if end_frame != start_frame and end_frame not in key_frames:
             key_frames.append(end_frame)
         
         total = len(key_frames)
@@ -634,28 +641,106 @@ async def _background_ai_edit(
             ai_edit_progress={"done": 0, "total": total},
         )
         
-        # Transform key frames using reference preview
-        for idx, frame_idx in enumerate(key_frames):
+        # Process frames concurrently with a semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(4)  # Process up to 4 frames concurrently
+        completed_count = 0
+        import time
+        
+        async def transform_frame(frame_idx: int, idx: int):
+            """Transform a single frame with concurrency control."""
+            nonlocal completed_count
             frame_path = frames_dir / f"frame_{frame_idx:04d}.jpg"
             if not frame_path.exists():
-                continue
+                completed_count += 1
+                project_manager.update_status(
+                    project_id,
+                    ai_edit_progress={"done": completed_count, "total": total},
+                )
+                return
             
-            print(f"Transforming frame {frame_idx} ({idx + 1}/{total})")
+            # Print before acquiring semaphore to show when task starts
+            start_time = time.time()
+            print(f"[START] Transforming frame {frame_idx} ({idx + 1}/{total})")
             
-            # Use reference frame for consistency
-            edited_bytes = await gemini_service.edit_frame_with_reference(
-                frame_path,
-                prompt,
-                preview_path,
+            async with semaphore:
+                # Print when semaphore is acquired (should show concurrent execution)
+                print(f"[ACQUIRED] Frame {frame_idx} acquired semaphore at {time.time():.2f}")
+                
+                try:
+                    # Use reference frame for consistency
+                    edited_bytes = await gemini_service.edit_frame_with_reference(
+                        frame_path,
+                        prompt,
+                        preview_path,
+                    )
+                    
+                    # Save transformed frame (overwrite original)
+                    frame_path.write_bytes(edited_bytes)
+                    
+                    elapsed = time.time() - start_time
+                    print(f"[DONE] Frame {frame_idx} completed in {elapsed:.2f}s")
+                    
+                    completed_count += 1
+                    project_manager.update_status(
+                        project_id,
+                        ai_edit_progress={"done": completed_count, "total": total},
+                    )
+                except Exception as e:
+                    print(f"[ERROR] Error transforming frame {frame_idx}: {e}")
+                    completed_count += 1
+                    project_manager.update_status(
+                        project_id,
+                        ai_edit_progress={"done": completed_count, "total": total},
+                    )
+                    raise
+        
+        # Process all frames concurrently (limited by semaphore)
+        print(f"[INFO] Starting concurrent transformation of {total} frames")
+        tasks = [transform_frame(frame_idx, idx) for idx, frame_idx in enumerate(key_frames)]
+        await asyncio.gather(*tasks)
+        
+        print(f"[INFO] AI transformation complete: transformed {total} key frames: {key_frames}")
+        
+        # Now interpolate frames between key frames using RIFE
+        print(f"[INFO] Starting RIFE interpolation between key frames")
+        
+        async def interpolate_segment(start_frame_idx: int, end_frame_idx: int):
+            """Interpolate frames between two key frames using RIFE."""
+            # Calculate which frames need to be interpolated
+            frames_to_interpolate = []
+            for frame_idx in range(start_frame_idx + 1, end_frame_idx):
+                frame_path = frames_dir / f"frame_{frame_idx:04d}.jpg"
+                if frame_path.exists():
+                    frames_to_interpolate.append(frame_path)
+            
+            if len(frames_to_interpolate) == 0:
+                return
+            
+            start_path = frames_dir / f"frame_{start_frame_idx:04d}.jpg"
+            end_path = frames_dir / f"frame_{end_frame_idx:04d}.jpg"
+            
+            if not start_path.exists() or not end_path.exists():
+                print(f"[RIFE] Skipping interpolation: start or end frame missing")
+                return
+            
+            # Run RIFE interpolation in executor (it's CPU/GPU bound)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: rife_service.interpolate_pair(start_path, end_path, frames_to_interpolate)
             )
-            
-            # Save transformed frame (overwrite original)
-            frame_path.write_bytes(edited_bytes)
-            
-            project_manager.update_status(
-                project_id,
-                ai_edit_progress={"done": idx + 1, "total": total},
-            )
+            print(f"[RIFE] Interpolated {len(frames_to_interpolate)} frames between {start_frame_idx} and {end_frame_idx}")
+        
+        # Interpolate between each pair of consecutive key frames
+        interpolation_tasks = []
+        for i in range(len(key_frames) - 1):
+            start_frame_idx = key_frames[i]
+            end_frame_idx = key_frames[i + 1]
+            interpolation_tasks.append(interpolate_segment(start_frame_idx, end_frame_idx))
+        
+        if interpolation_tasks:
+            await asyncio.gather(*interpolation_tasks)
+            print(f"[INFO] RIFE interpolation complete")
         
         project_manager.update_status(
             project_id,
@@ -664,7 +749,7 @@ async def _background_ai_edit(
             ai_edit_transformed_frames=key_frames,  # Track which frames were transformed
             ai_generation_id=None,  # Clear generation ID after completion to prevent reuse
         )
-        print(f"AI edit complete: transformed {total} frames: {key_frames}")
+        print(f"AI edit complete: transformed {total} key frames and interpolated intermediate frames with RIFE")
         
     except Exception as e:
         import traceback

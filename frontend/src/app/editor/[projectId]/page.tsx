@@ -82,6 +82,7 @@ export default function EditorPage() {
           maskCount={editor.maskCount}
           maskVersion={editor.maskVersion}
           editVersion={editor.editVersion}
+          transformedFrameVersions={editor.transformedFrameVersions}
           selectedObjectId={editor.selectedObjectId}
           editMode={editor.editMode}
           editParams={editor.editParams}

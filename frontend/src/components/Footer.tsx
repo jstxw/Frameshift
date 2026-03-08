@@ -1,8 +1,40 @@
-import { Play } from "lucide-react";
+"use client";
+
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Play, Loader2 } from "lucide-react";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export function Footer() {
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+
+  async function uploadFile(file: File) {
+    setUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${API_URL}/upload`, { method: "POST", body: formData });
+    const data = await res.json();
+    router.push(`/editor/${data.project_id}`);
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) uploadFile(file);
+    if (e.target) e.target.value = "";
+  };
+
   return (
     <footer className="bg-[var(--surface-dark)] py-12 px-6 md:px-24">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="video/*"
+        onChange={handleFileChange}
+        className="hidden"
+      />
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
         {/* Logo */}
         <div className="flex items-center gap-2">
@@ -15,8 +47,19 @@ export function Footer() {
         </div>
 
         {/* CTA */}
-        <button className="px-7 py-3 rounded-xl bg-[var(--accent)] text-white font-semibold transition-all duration-300 hover:bg-[var(--accent-hover)] hover:scale-[1.02] active:scale-[0.98] cursor-pointer">
-          Get Started
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="inline-flex items-center gap-2 px-7 py-3 rounded-xl bg-[var(--accent)] text-white font-semibold transition-all duration-300 hover:bg-[var(--accent-hover)] hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-50"
+          disabled={uploading}
+        >
+          {uploading ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Uploading…
+            </>
+          ) : (
+            "Get Started"
+          )}
         </button>
       </div>
 

@@ -25,12 +25,22 @@ def _get_model():
     else:
         _device = torch.device("cpu")
 
+    # Import warplayer and patch its device variable to match our device
+    # This is needed because warplayer uses a global device that doesn't account for MPS
+    import warplayer
+    warplayer.device = _device
+    # Clear the cached grid to ensure it's recreated with the correct device
+    warplayer.backwarp_tenGrid = {}
+    
     from RIFE_HDv3 import Model
     _model = Model()
-    weights_path = Path(__file__).resolve().parent.parent / "rife_vendor" / "model"
+    weights_path = Path(__file__).resolve().parent.parent / "rife_vendor" / "model" / "flownet-v46.pkl"
     _model.load_model(str(weights_path), -1)
     _model.eval()
-    _model.device()
+    
+    # Move model to the correct device (the device() method uses a global device variable
+    # that doesn't account for MPS, so we need to manually move it)
+    _model.flownet.to(_device)
 
     return _model, _device
 

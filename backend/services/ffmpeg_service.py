@@ -1,7 +1,39 @@
 import subprocess
+import shutil
 from pathlib import Path
 
-_FFMPEG = r"C:\Users\User\Downloads\ffmpeg-master-latest-win64-gpl-shared\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
+# Detect FFmpeg from system PATH
+_FFMPEG = shutil.which("ffmpeg")
+if _FFMPEG is None:
+    # Fallback: try common installation paths
+    import platform
+    if platform.system() == "Windows":
+        # Try common Windows locations
+        possible_paths = [
+            r"C:\ffmpeg\bin\ffmpeg.exe",
+            r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+        ]
+        for path in possible_paths:
+            if Path(path).exists():
+                _FFMPEG = path
+                break
+    elif platform.system() == "Darwin":  # macOS
+        # Try Homebrew location
+        brew_path = Path("/opt/homebrew/bin/ffmpeg")
+        if brew_path.exists():
+            _FFMPEG = str(brew_path)
+        else:
+            brew_path = Path("/usr/local/bin/ffmpeg")
+            if brew_path.exists():
+                _FFMPEG = str(brew_path)
+    
+    if _FFMPEG is None:
+        raise RuntimeError(
+            "FFmpeg not found. Please install FFmpeg:\n"
+            "  macOS: brew install ffmpeg\n"
+            "  Windows: winget install FFmpeg\n"
+            "  Linux: sudo apt-get install ffmpeg"
+        )
 
 
 def extract_frames(video_path: Path, output_dir: Path, fps: int = 30) -> int:
