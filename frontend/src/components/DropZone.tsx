@@ -23,6 +23,13 @@ export function DropZone() {
     const res = await fetch(`${API_URL}/upload`, { method: "POST", body: formData });
     const data = await res.json();
 
+    // Register project in Supabase (best-effort — don't block navigation on failure)
+    fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_id: data.project_id, name: file.name }),
+    }).catch(() => {});
+
     // Redirect immediately — editor will kick off extract and poll for readiness
     router.push(`/editor/${data.project_id}`);
   }

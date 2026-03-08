@@ -51,6 +51,7 @@ interface EditorState {
   aiGenerationId: string | null;
   isAIGenerating: boolean;
   aiEditStatus: "idle" | "preview" | "applying" | "done";
+  storageBaseUrl: string | null;
 }
 
 const DEFAULT_EDIT_PARAMS: EditParams = {
@@ -59,7 +60,7 @@ const DEFAULT_EDIT_PARAMS: EditParams = {
   replace: { imageUrl: null },
 };
 
-export function useEditorState(projectId?: string) {
+export function useEditorState(projectId?: string, initialFrame = 0) {
   const [state, setState] = useState<EditorState>({
     projectId: projectId ?? null,
     videoLoaded: false,
@@ -69,7 +70,7 @@ export function useEditorState(projectId?: string) {
     frames: [],
     frameWidth: 0,
     frameHeight: 0,
-    currentFrame: 0,
+    currentFrame: initialFrame,
     isPlaying: false,
     allDetections: {},
     detections: [],
@@ -94,6 +95,7 @@ export function useEditorState(projectId?: string) {
     aiGenerationId: null,
     isAIGenerating: false,
     aiEditStatus: "idle",
+    storageBaseUrl: null,
   });
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -170,6 +172,7 @@ export function useEditorState(projectId?: string) {
               isDetecting: !!status.detecting,
               isSegmenting: !!status.segmenting,
               maskCount: status.mask_count || 0,
+              storageBaseUrl: status.storage_base_url || s.storageBaseUrl,
             }));
 
             // Store all per-frame detections

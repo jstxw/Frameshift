@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Play, ChevronLeft, Sun, Moon } from "lucide-react";
+import { Play, ChevronLeft, Sun, Moon, Save, Check } from "lucide-react";
+import { useUser } from "@auth0/nextjs-auth0/client";
 
 interface EditorTopBarProps {
   videoName: string;
@@ -19,6 +20,19 @@ export function EditorTopBar({
   onToggleTheme,
 }: EditorTopBarProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [showSignInPrompt, setShowSignInPrompt] = useState(false);
+  const { user } = useUser();
+
+  function handleSave() {
+    if (!user) {
+      setShowSignInPrompt(true);
+      return;
+    }
+    // Already auto-saving via useProjectSync — just show confirmation
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
 
   return (
     <header
@@ -72,19 +86,70 @@ export function EditorTopBar({
         )}
       </div>
 
-      {/* Right: Theme toggle */}
-      <button
-        onClick={onToggleTheme}
-        className="w-9 h-9 flex items-center justify-center rounded-xl transition-all hover:scale-105"
-        style={{
-          background: "var(--ed-overlay)",
-          color: "var(--ed-icon)",
-          border: "1px solid var(--ed-border)",
-        }}
-        title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-      >
-        {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-      </button>
+      {/* Right: Save + Theme toggle */}
+      <div className="flex items-center gap-2">
+        {videoLoaded && (
+          <button
+            onClick={handleSave}
+            className="flex items-center gap-1.5 px-3 h-9 rounded-xl text-sm font-semibold transition-all hover:scale-105"
+            style={{
+              background: saved ? "rgba(16,185,129,0.15)" : "rgba(244,63,94,0.15)",
+              color: saved ? "#10B981" : "var(--accent)",
+              border: `1px solid ${saved ? "rgba(16,185,129,0.3)" : "rgba(244,63,94,0.3)"}`,
+            }}
+          >
+            {saved ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+            {saved ? "Saved" : "Save"}
+          </button>
+        )}
+        <button
+          onClick={onToggleTheme}
+          className="w-9 h-9 flex items-center justify-center rounded-xl transition-all hover:scale-105"
+          style={{
+            background: "var(--ed-overlay)",
+            color: "var(--ed-icon)",
+            border: "1px solid var(--ed-border)",
+          }}
+          title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+        </button>
+      </div>
+
+      {/* Sign-in prompt modal */}
+      {showSignInPrompt && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setShowSignInPrompt(false)}
+        >
+          <div
+            className="bg-white rounded-2xl p-8 max-w-sm w-full mx-4 text-center shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-14 h-14 rounded-2xl bg-[rgba(244,63,94,0.1)] flex items-center justify-center mx-auto mb-4">
+              <Save className="w-6 h-6 text-[#F43F5E]" />
+            </div>
+            <h2 className="text-xl font-[550] text-[#171717] mb-2">Sign in to save</h2>
+            <p className="text-[#6B7280] text-sm mb-6">
+              Create a free account to save your projects and pick up where you left off.
+            </p>
+            <div className="flex flex-col gap-3">
+              <a
+                href={`/api/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`}
+                className="bg-[#F43F5E] hover:bg-[#E11D48] text-white font-semibold text-sm px-6 py-3 rounded-xl transition-all duration-300 hover:scale-[1.02]"
+              >
+                Sign in / Create account
+              </a>
+              <button
+                onClick={() => setShowSignInPrompt(false)}
+                className="text-sm text-[#6B7280] hover:text-[#171717] transition-colors"
+              >
+                Continue without saving
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

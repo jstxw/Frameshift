@@ -29,6 +29,7 @@ interface EditorCanvasProps {
   frameHeight: number;
   previewFrameUrl: string | null;
   aiEditStatus: "idle" | "preview" | "applying" | "done";
+  storageBaseUrl: string | null;
   onSelectObject: (id: string | null) => void;
   onUpload: () => void;
   onApplyEdit: (action: EditAction, params: { color?: string; prompt?: string; scale?: number }) => void;
@@ -56,6 +57,7 @@ export function EditorCanvas({
   frameHeight,
   previewFrameUrl,
   aiEditStatus,
+  storageBaseUrl,
   onSelectObject,
   onUpload,
   onApplyEdit,
@@ -90,10 +92,13 @@ export function EditorCanvas({
   // Use per-frame versioning for transformed frames, otherwise use global editVersion
   const currentFrameIndex = currentFrame + 1; // Backend uses 1-based indexing
   const frameVersion = transformedFrameVersions?.[currentFrameIndex] ?? editVersion;
+  const paddedIndex = String(currentFrameIndex).padStart(4, "0");
   const frameUrl = aiEditStatus === "preview" && previewFrameUrl
     ? previewFrameUrl
     : projectId
-    ? `${API_URL}/frame/${projectId}/${currentFrameIndex}?v=${frameVersion}`
+    ? storageBaseUrl && frameVersion === 0
+      ? `${storageBaseUrl}/frame_${paddedIndex}.jpg`
+      : `${API_URL}/frame/${projectId}/${currentFrameIndex}?v=${frameVersion}`
     : null;
 
   return (

@@ -7,13 +7,24 @@ import { EditToolbar } from "@/components/editor/EditToolbar";
 import { AIChatPane } from "@/components/editor/AIChatPane";
 import { Toast } from "@/components/editor/Toast";
 import { useEditorState } from "@/hooks/useEditorState";
+import { useProjectSync } from "@/hooks/useProjectSync";
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 
 export default function EditorPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const projectId = params.projectId as string;
-  const editor = useEditorState(projectId);
+  const initialFrame = Number(searchParams.get("frame") ?? 0);
+  const editor = useEditorState(projectId, initialFrame);
+
+  useProjectSync({
+    projectId,
+    currentFrame: editor.currentFrame,
+    videoLoaded: editor.videoLoaded,
+    status: editor.videoLoaded ? "ready" : "created",
+    thumbnailUrl: editor.storageBaseUrl ? `${editor.storageBaseUrl}/frame_0001.jpg` : null,
+  });
   const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [isDark, setIsDark] = useState(false);
 
@@ -94,6 +105,7 @@ export default function EditorPage() {
           frameHeight={editor.frameHeight}
           previewFrameUrl={editor.aiPreviewFrameUrl}
           aiEditStatus={editor.aiEditStatus}
+          storageBaseUrl={editor.storageBaseUrl}
           onSelectObject={editor.selectObject}
           onUpload={editor.loadVideo}
           onApplyEdit={editor.applyEditAction}
