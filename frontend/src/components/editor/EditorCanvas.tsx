@@ -26,6 +26,8 @@ interface EditorCanvasProps {
   totalFrames: number;
   frameWidth: number;
   frameHeight: number;
+  previewFrameUrl: string | null;
+  aiEditStatus: "idle" | "preview" | "applying" | "done";
   onSelectObject: (id: string | null) => void;
   onUpload: () => void;
   onApplyEdit: (action: EditAction, params: { color?: string; prompt?: string; scale?: number }) => void;
@@ -50,6 +52,8 @@ export function EditorCanvas({
   totalFrames,
   frameWidth,
   frameHeight,
+  previewFrameUrl,
+  aiEditStatus,
   onSelectObject,
   onUpload,
   onApplyEdit,
@@ -80,7 +84,10 @@ export function EditorCanvas({
     return <EmptyCanvas onUpload={onUpload} />;
   }
 
-  const frameUrl = projectId
+  // Show preview frame if in preview mode, otherwise show current frame
+  const frameUrl = aiEditStatus === "preview" && previewFrameUrl
+    ? previewFrameUrl
+    : projectId
     ? `${API_URL}/frame/${projectId}/${currentFrame + 1}?v=${editVersion}`
     : null;
 
@@ -89,27 +96,29 @@ export function EditorCanvas({
       className="flex-1 flex items-center justify-center overflow-hidden relative"
       style={{ background: "var(--ed-bg)" }}
     >
-      {/* Segment toggle */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setSegmentMode(!segmentMode);
-        }}
-        className="absolute top-4 right-4 z-30 flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all border"
-        style={segmentMode ? {
-          background: "var(--accent)",
-          color: "#fff",
-          borderColor: "var(--accent)",
-          boxShadow: "0 4px 16px rgba(244,63,94,0.3)",
-        } : {
-          background: "var(--ed-surface)",
-          color: "var(--ed-icon)",
-          borderColor: "var(--ed-border)",
-        }}
-      >
-        <Crosshair className="w-3.5 h-3.5" />
-        {segmentMode ? "Click to segment" : "Segment"}
-      </button>
+      {/* Segment toggle - hide when showing AI preview */}
+      {aiEditStatus !== "preview" && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setSegmentMode(!segmentMode);
+          }}
+          className="absolute top-4 right-4 z-30 flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium transition-all border"
+          style={segmentMode ? {
+            background: "var(--accent)",
+            color: "#fff",
+            borderColor: "var(--accent)",
+            boxShadow: "0 4px 16px rgba(244,63,94,0.3)",
+          } : {
+            background: "var(--ed-surface)",
+            color: "var(--ed-icon)",
+            borderColor: "var(--ed-border)",
+          }}
+        >
+          <Crosshair className="w-3.5 h-3.5" />
+          {segmentMode ? "Click to segment" : "Segment"}
+        </button>
+      )}
 
       {isDetecting && (
         <div className="absolute inset-0 z-20 pointer-events-none animate-detection-shimmer" />
@@ -129,11 +138,24 @@ export function EditorCanvas({
           onClick={handleCanvasClick}
         >
           {frameUrl ? (
-            <img
-              src={frameUrl}
-              alt={`Frame ${currentFrame + 1}`}
-              className="absolute inset-0 w-full h-full object-contain pointer-events-none"
-            />
+            <>
+              <img
+                src={frameUrl}
+                alt={aiEditStatus === "preview" ? "AI Preview" : `Frame ${currentFrame + 1}`}
+                className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+              />
+              {aiEditStatus === "preview" && (
+                <div className="absolute top-4 left-4 z-30 px-3 py-1.5 rounded-xl text-xs font-medium border"
+                  style={{
+                    background: "rgba(244,63,94,0.9)",
+                    color: "#fff",
+                    borderColor: "var(--accent)",
+                  }}
+                >
+                  AI Preview
+                </div>
+              )}
+            </>
           ) : (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-sm font-medium" style={{ color: "var(--ed-disabled)" }}>
@@ -155,7 +177,8 @@ export function EditorCanvas({
             </div>
           )}
 
-          {projectId && maskCount > 0 && !isSegmenting && (
+          {/* Hide masks and detections when showing AI preview */}
+          {aiEditStatus !== "preview" && projectId && maskCount > 0 && !isSegmenting && (
             <img
               src={`${API_URL}/mask/${projectId}/${currentFrame + 1}?v=${maskVersion}`}
               alt="Segmentation mask"
@@ -176,7 +199,7 @@ export function EditorCanvas({
             </div>
           )}
 
-          {!segmentMode && detections.map((det) => (
+          {!segmentMode && aiEditStatus !== "preview" && detections.map((det) => (
             <BoundingBox
               key={det.id}
               detection={det}

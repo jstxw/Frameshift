@@ -29,6 +29,11 @@ def create_project() -> dict:
         "detections": {},
         "edit_status": "idle",
         "edit_progress": {"done": 0, "total": 0},
+        "ai_generation_id": None,
+        "ai_preview_url": None,
+        "ai_prompt": None,
+        "ai_edit_status": None,
+        "ai_edit_progress": None,
     })
 
     return {"project_id": project_id, "project_dir": str(project_dir)}

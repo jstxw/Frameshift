@@ -8,6 +8,7 @@ import {
   type FrameData,
   generateFrames,
 } from "@/lib/mock-data";
+import type { ChatMessage } from "@/components/editor/AIChatPane";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -44,6 +45,11 @@ interface EditorState {
   showEditPanel: boolean;
   toastMessage: string;
   showToast: boolean;
+  aiChatHistory: ChatMessage[];
+  aiPreviewFrameUrl: string | null;
+  aiGenerationId: string | null;
+  isAIGenerating: boolean;
+  aiEditStatus: "idle" | "preview" | "applying" | "done";
 }
 
 const DEFAULT_EDIT_PARAMS: EditParams = {
@@ -82,6 +88,11 @@ export function useEditorState(projectId?: string) {
     showEditPanel: false,
     toastMessage: "",
     showToast: false,
+    aiChatHistory: [],
+    aiPreviewFrameUrl: null,
+    aiGenerationId: null,
+    isAIGenerating: false,
+    aiEditStatus: "idle",
   });
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -129,6 +140,19 @@ export function useEditorState(projectId?: string) {
             // Store all per-frame detections
             if (status.detections && Object.keys(status.detections).length > 0) {
               setState((s) => ({ ...s, allDetections: status.detections }));
+            }
+
+            // Update AI edit status
+            if (status.ai_edit_status !== undefined) {
+              setState((s) => ({
+                ...s,
+                aiEditStatus: status.ai_edit_status === "processing" ? "applying" : 
+                             status.ai_edit_status === "done" ? "done" : 
+                             status.ai_edit_status === "preview" ? "preview" : 
+                             status.ai_edit_status === "error" ? "idle" : s.aiEditStatus,
+                aiPreviewFrameUrl: status.ai_preview_url ? `${API_URL}${status.ai_preview_url}` : s.aiPreviewFrameUrl,
+                aiGenerationId: status.ai_generation_id || s.aiGenerationId,
+              }));
             }
 
             // Stop polling once ready, not detecting, and not segmenting
@@ -371,7 +395,17 @@ export function useEditorState(projectId?: string) {
   );
 
   const setCurrentFrame = useCallback((frame: number) => {
-    setState((s) => ({ ...s, currentFrame: frame }));
+    setState((s) => {
+      // Clear preview when changing frames (unless we're applying the edit)
+      const shouldClearPreview = s.aiEditStatus === "preview" && s.currentFrame !== frame;
+      return {
+        ...s,
+        currentFrame: frame,
+        // Clear preview when navigating away
+        aiPreviewFrameUrl: shouldClearPreview ? null : s.aiPreviewFrameUrl,
+        aiEditStatus: shouldClearPreview ? "idle" : s.aiEditStatus,
+      };
+    });
   }, []);
 
   const togglePlay = useCallback(() => {
@@ -407,6 +441,205 @@ export function useEditorState(projectId?: string) {
     setState((s) => ({ ...s, showToast: false }));
   }, []);
 
+  const sendAIPrompt = useCallback((prompt: string) => {
+    setState((s) => {
+      if (!s.projectId) return s;
+
+      // Add user message to chat history
+      const userMessage: ChatMessage = {
+        role: "user",
+        message: prompt,
+        timestamp: Date.now(),
+      };
+
+      setState((prev) => ({
+        ...prev,
+        aiChatHistory: [...prev.aiChatHistory, userMessage],
+        isAIGenerating: true,
+        aiEditStatus: "idle",
+      }));
+
+      // Call preview endpoint
+      fetch(`${API_URL}/ai/edit/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: s.projectId,
+          frame_index: s.currentFrame + 1,
+          prompt: prompt,
+        }),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
+            throw new Error(errorData.error || `HTTP ${res.status}`);
+          }
+          return res.json();
+        })
+        .then((data) => {
+          if (data.error) {
+            throw new Error(data.error);
+          }
+          const previewUrl = `${API_URL}${data.preview_url}`;
+          console.log("Preview URL:", previewUrl);
+          const assistantMessage: ChatMessage = {
+            role: "assistant",
+            message: "Preview generated! Review it in the canvas.",
+            timestamp: Date.now(),
+          };
+          setState((prev) => ({
+            ...prev,
+            aiChatHistory: [...prev.aiChatHistory, assistantMessage],
+            aiPreviewFrameUrl: previewUrl,
+            aiGenerationId: data.generation_id,
+            isAIGenerating: false,
+            aiEditStatus: "preview",
+          }));
+        })
+        .catch((err) => {
+          console.error("AI preview error:", err);
+          setState((prev) => ({
+            ...prev,
+            isAIGenerating: false,
+            aiEditStatus: "idle",
+            showToast: true,
+            toastMessage: `Failed to generate preview: ${err.message}`,
+          }));
+        });
+
+      return s;
+    });
+  }, []);
+
+  const acceptAIGeneration = useCallback(() => {
+    setState((s) => {
+      if (!s.projectId || !s.aiGenerationId) return s;
+
+      const startFrame = s.editRangeStart > 0 ? s.editRangeStart + 1 : s.currentFrame + 1;
+      const endFrame = s.editRangeEnd > 0 ? s.editRangeEnd + 1 : s.frames.length;
+      const interval = 30; // Apply to every 30th frame
+
+      fetch(`${API_URL}/ai/edit/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: s.projectId,
+          generation_id: s.aiGenerationId,
+          start_frame: startFrame,
+          end_frame: endFrame,
+          interval: interval,
+        }),
+      }).then(() => {
+        setState((prev) => ({
+          ...prev,
+          aiEditStatus: "applying",
+          aiPreviewFrameUrl: null, // Clear preview when starting to apply
+        }));
+
+        // Poll for completion
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+        const pollAIEdit = async () => {
+          try {
+            const res = await fetch(`${API_URL}/project/${s.projectId}/status`);
+            const status = await res.json();
+            if (status.ai_edit_status === "done" || status.ai_edit_status === "error") {
+              setState((prev) => ({
+                ...prev,
+                aiEditStatus: status.ai_edit_status === "done" ? "done" : "idle",
+                aiPreviewFrameUrl: null, // Clear preview after applying
+                aiGenerationId: null,
+                editVersion: prev.editVersion + 1,
+                showToast: true,
+                toastMessage: status.ai_edit_status === "done"
+                  ? "AI edit applied successfully"
+                  : `AI edit failed: ${status.ai_edit_error || "unknown error"}`,
+              }));
+              if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+              }
+            }
+          } catch { /* keep polling */ }
+        };
+        pollingRef.current = setInterval(pollAIEdit, 1500);
+      });
+
+      return { ...s, aiEditStatus: "applying" };
+    });
+  }, []);
+
+  const rejectAIGeneration = useCallback(() => {
+    setState((s) => {
+      if (!s.projectId || !s.aiGenerationId) return s;
+
+      fetch(`${API_URL}/ai/edit/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: s.projectId,
+          generation_id: s.aiGenerationId,
+        }),
+      });
+
+      return {
+        ...s,
+        aiPreviewFrameUrl: null,
+        aiGenerationId: null,
+        aiEditStatus: "idle",
+      };
+    });
+  }, []);
+
+  const retryAIGeneration = useCallback(() => {
+    setState((s) => {
+      if (!s.projectId || !s.aiGenerationId) return s;
+
+      setState((prev) => ({
+        ...prev,
+        isAIGenerating: true,
+      }));
+
+      fetch(`${API_URL}/ai/edit/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: s.projectId,
+          generation_id: s.aiGenerationId,
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          const assistantMessage: ChatMessage = {
+            role: "assistant",
+            message: "Preview regenerated! Review it below.",
+            timestamp: Date.now(),
+          };
+          setState((prev) => ({
+            ...prev,
+            aiChatHistory: [...prev.aiChatHistory, assistantMessage],
+            aiPreviewFrameUrl: `${API_URL}${data.preview_url}`,
+            aiGenerationId: data.generation_id,
+            isAIGenerating: false,
+            aiEditStatus: "preview",
+          }));
+        })
+        .catch((err) => {
+          console.error("AI retry error:", err);
+          setState((prev) => ({
+            ...prev,
+            isAIGenerating: false,
+            showToast: true,
+            toastMessage: "Failed to retry generation",
+          }));
+        });
+
+      return s;
+    });
+  }, []);
+
   const selectedObject = useMemo(
     () => state.detections.find((d) => d.id === state.selectedObjectId) ?? null,
     [state.detections, state.selectedObjectId]
@@ -431,5 +664,9 @@ export function useEditorState(projectId?: string) {
     closeEditPanel,
     setVideoName,
     hideToast,
+    sendAIPrompt,
+    acceptAIGeneration,
+    rejectAIGeneration,
+    retryAIGeneration,
   };
 }

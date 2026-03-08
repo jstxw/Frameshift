@@ -7,8 +7,10 @@ from typing import Optional, List
 import shutil
 import asyncio
 import numpy as np
+import uuid
+from pathlib import Path
 
-from services import cloudinary_service, project_manager, ffmpeg_service, yolo_service, sam2_service
+from services import cloudinary_service, project_manager, ffmpeg_service, yolo_service, sam2_service, gemini_service, rife_service
 
 load_dotenv()
 cloudinary_service.configure()
@@ -55,7 +57,7 @@ class ExtractRequest(BaseModel):
     project_id: str
 
 def _background_extract(project_id: str):
-    """Background task: extract frames, then kick off YOLO in background."""
+    """Background task: extract frames (YOLO detection disabled)."""
     project_dir = project_manager.get_project_dir(project_id)
     video_path = project_dir / "original.mp4"
     frames_dir = project_dir / "frames"
@@ -73,19 +75,20 @@ def _background_extract(project_id: str):
     # Mark ready immediately so frontend can show frames
     project_manager.update_status(project_id, status="ready", frame_count=frame_count,
                                    frame_width=frame_width, frame_height=frame_height,
-                                   detecting=True, detections={})
+                                   detecting=False, detections={})
 
-    # Run YOLO on all frames, updating detections progressively
-    detections = {}
-    frame_files = sorted(frames_dir.glob("frame_*.jpg"))
-    for i, f in enumerate(frame_files, start=1):
-        dets = yolo_service.detect(f)
-        detections[str(i)] = dets
-        # Update every 10 frames so frontend can poll partial results
-        if i % 10 == 0 or i == len(frame_files):
-            project_manager.update_status(project_id, detections=detections, detected_frames=i)
-
-    project_manager.update_status(project_id, detecting=False, detections=detections, detected_frames=len(frame_files))
+    # YOLO detection disabled
+    # # Run YOLO on all frames, updating detections progressively
+    # detections = {}
+    # frame_files = sorted(frames_dir.glob("frame_*.jpg"))
+    # for i, f in enumerate(frame_files, start=1):
+    #     dets = yolo_service.detect(f)
+    #     detections[str(i)] = dets
+    #     # Update every 10 frames so frontend can poll partial results
+    #     if i % 10 == 0 or i == len(frame_files):
+    #         project_manager.update_status(project_id, detections=detections, detected_frames=i)
+    # 
+    # project_manager.update_status(project_id, detecting=False, detections=detections, detected_frames=len(frame_files))
 
 @app.post("/extract")
 async def extract_frames(req: ExtractRequest, background_tasks: BackgroundTasks):
@@ -108,72 +111,72 @@ async def get_frame(project_id: str, frame_index: int):
     return FileResponse(frame_path, media_type="image/jpeg")
 
 
-# --- Detect ---
+# --- Detect --- (DISABLED)
 
-class DetectRequest(BaseModel):
-    project_id: str
-    frame_index: int
+# class DetectRequest(BaseModel):
+#     project_id: str
+#     frame_index: int
 
-@app.post("/detect")
-async def detect_objects(req: DetectRequest):
-    project_dir = project_manager.get_project_dir(req.project_id)
-    frame_path = project_dir / "frames" / f"frame_{req.frame_index:04d}.jpg"
+# @app.post("/detect")
+# async def detect_objects(req: DetectRequest):
+#     project_dir = project_manager.get_project_dir(req.project_id)
+#     frame_path = project_dir / "frames" / f"frame_{req.frame_index:04d}.jpg"
+# 
+#     if not frame_path.exists():
+#         return {"error": "Frame not found"}
+# 
+#     detections = yolo_service.detect(frame_path)
+#     return {"project_id": req.project_id, "frame_index": req.frame_index, "objects": detections}
 
-    if not frame_path.exists():
-        return {"error": "Frame not found"}
 
-    detections = yolo_service.detect(frame_path)
-    return {"project_id": req.project_id, "frame_index": req.frame_index, "objects": detections}
+# --- Segment --- (DISABLED)
 
+# class SegmentRequest(BaseModel):
+#     project_id: str
+#     frame_index: int
+#     click_x: int
+#     click_y: int
 
-# --- Segment ---
+# def _background_segment_and_propagate(project_id: str, frame_index: int, click_x: int, click_y: int):
+#     """Background task: segment the single clicked frame only."""
+#     project_dir = project_manager.get_project_dir(project_id)
+#     frame_path = project_dir / "frames" / f"frame_{frame_index:04d}.jpg"
+#     masks_dir = project_dir / "masks"
+#     masks_dir.mkdir(parents=True, exist_ok=True)
+# 
+#     project_manager.update_status(project_id, segmenting=True, segment_status="segmenting")
+# 
+#     mask = sam2_service.segment_frame(frame_path, click_x, click_y)
+# 
+#     # Save mask for just this frame
+#     from PIL import Image
+#     mask_img = (mask.astype(np.uint8)) * 255
+#     mask_path = masks_dir / f"mask_{frame_index:04d}.png"
+#     Image.fromarray(mask_img).save(mask_path)
+# 
+#     project_manager.update_status(
+#         project_id, segmenting=False, segment_status="done",
+#         mask_count=1, anchor_frame=frame_index,
+#     )
 
-class SegmentRequest(BaseModel):
-    project_id: str
-    frame_index: int
-    click_x: int
-    click_y: int
-
-def _background_segment_and_propagate(project_id: str, frame_index: int, click_x: int, click_y: int):
-    """Background task: segment the single clicked frame only."""
-    project_dir = project_manager.get_project_dir(project_id)
-    frame_path = project_dir / "frames" / f"frame_{frame_index:04d}.jpg"
-    masks_dir = project_dir / "masks"
-    masks_dir.mkdir(parents=True, exist_ok=True)
-
-    project_manager.update_status(project_id, segmenting=True, segment_status="segmenting")
-
-    mask = sam2_service.segment_frame(frame_path, click_x, click_y)
-
-    # Save mask for just this frame
-    from PIL import Image
-    mask_img = (mask.astype(np.uint8)) * 255
-    mask_path = masks_dir / f"mask_{frame_index:04d}.png"
-    Image.fromarray(mask_img).save(mask_path)
-
-    project_manager.update_status(
-        project_id, segmenting=False, segment_status="done",
-        mask_count=1, anchor_frame=frame_index,
-    )
-
-@app.post("/segment")
-async def segment_object(req: SegmentRequest, background_tasks: BackgroundTasks):
-    project_dir = project_manager.get_project_dir(req.project_id)
-    frame_path = project_dir / "frames" / f"frame_{req.frame_index:04d}.jpg"
-
-    if not frame_path.exists():
-        return {"error": "Frame not found"}
-
-    background_tasks.add_task(
-        _background_segment_and_propagate,
-        req.project_id, req.frame_index, req.click_x, req.click_y,
-    )
-
-    return {
-        "project_id": req.project_id,
-        "status": "processing",
-        "anchor_frame": req.frame_index,
-    }
+# @app.post("/segment")
+# async def segment_object(req: SegmentRequest, background_tasks: BackgroundTasks):
+#     project_dir = project_manager.get_project_dir(req.project_id)
+#     frame_path = project_dir / "frames" / f"frame_{req.frame_index:04d}.jpg"
+# 
+#     if not frame_path.exists():
+#         return {"error": "Frame not found"}
+# 
+#     background_tasks.add_task(
+#         _background_segment_and_propagate,
+#         req.project_id, req.frame_index, req.click_x, req.click_y,
+#     )
+# 
+#     return {
+#         "project_id": req.project_id,
+#         "status": "processing",
+#         "anchor_frame": req.frame_index,
+#     }
 
 
 @app.get("/mask/{project_id}/{mask_index}")
@@ -403,6 +406,269 @@ async def edit_frames(req: EditRequest):
     # Run as a proper async task instead of BackgroundTasks (which can't await)
     asyncio.ensure_future(_background_edit(req.project_id, req.edit_rules))
     return {"project_id": req.project_id, "edit_status": "uploading"}
+
+
+# --- AI Edit ---
+
+class AIPreviewRequest(BaseModel):
+    project_id: str
+    frame_index: int
+    prompt: str
+
+class AIAcceptRequest(BaseModel):
+    project_id: str
+    generation_id: str
+    start_frame: int
+    end_frame: int
+    interval: int = 60  # Not used - only start and end frames are transformed
+
+class AIRejectRequest(BaseModel):
+    project_id: str
+    generation_id: str
+
+class AIRetryRequest(BaseModel):
+    project_id: str
+    generation_id: str
+
+@app.post("/ai/edit/preview")
+async def ai_edit_preview(req: AIPreviewRequest):
+    """Generate a preview of AI edit on a single frame."""
+    project_dir = project_manager.get_project_dir(req.project_id)
+    frames_dir = project_dir / "frames"
+    previews_dir = project_dir / "previews"
+    previews_dir.mkdir(exist_ok=True)
+
+    frame_path = frames_dir / f"frame_{req.frame_index:04d}.jpg"
+    if not frame_path.exists():
+        return {"error": f"Frame {req.frame_index} not found"}
+
+    # Generate preview using Gemini
+    try:
+        print(f"Generating preview for frame {req.frame_index} with prompt: {req.prompt}")
+        preview_bytes = await gemini_service.edit_frame(frame_path, req.prompt)
+        print(f"Preview generated successfully, size: {len(preview_bytes)} bytes")
+        
+        # Save preview
+        generation_id = str(uuid.uuid4())
+        preview_path = previews_dir / f"preview_{generation_id}.jpg"
+        preview_path.write_bytes(preview_bytes)
+        print(f"Preview saved to: {preview_path}")
+
+        # Store generation metadata
+        project_manager.update_status(
+            req.project_id,
+            ai_generation_id=generation_id,
+            ai_preview_url=f"/preview/{req.project_id}/{generation_id}",
+            ai_prompt=req.prompt,
+            ai_original_frame=req.frame_index,
+            ai_edit_status="preview",
+        )
+
+        return {
+            "generation_id": generation_id,
+            "preview_url": f"/preview/{req.project_id}/{generation_id}",
+        }
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error generating preview: {str(e)}")
+        print(error_trace)
+        return {"error": f"{str(e)}"}
+
+
+@app.get("/preview/{project_id}/{generation_id}")
+async def get_preview(project_id: str, generation_id: str):
+    """Serve preview image."""
+    from fastapi import HTTPException
+    project_dir = project_manager.get_project_dir(project_id)
+    preview_path = project_dir / "previews" / f"preview_{generation_id}.jpg"
+    if not preview_path.exists():
+        raise HTTPException(status_code=404, detail="Preview not found")
+    return FileResponse(str(preview_path), media_type="image/jpeg")
+
+
+@app.post("/ai/edit/accept")
+async def ai_edit_accept(req: AIAcceptRequest):
+    """Accept preview and apply transformation to range of frames."""
+    print(f"Accept endpoint called: project_id={req.project_id}, generation_id={req.generation_id}")
+    project_dir = project_manager.get_project_dir(req.project_id)
+    status = project_manager.get_status(req.project_id)
+    
+    # Prevent duplicate processing - check both status and generation_id
+    current_status = status.get("ai_edit_status")
+    if current_status == "processing":
+        print(f"REJECTING duplicate accept: already processing (generation_id: {status.get('ai_generation_id')})")
+        return {"error": "Edit already in progress", "status": "processing"}
+    
+    # Also check if this generation_id was already processed (generation_id is cleared after completion)
+    stored_generation_id = status.get("ai_generation_id")
+    if stored_generation_id and stored_generation_id != req.generation_id:
+        print(f"REJECTING accept: generation_id mismatch. Expected: {stored_generation_id}, Got: {req.generation_id}")
+        return {"error": "Invalid generation_id - this preview was already processed or expired"}
+    
+    # If generation_id is None, it means it was already processed
+    if stored_generation_id is None:
+        print(f"REJECTING accept: generation_id is None - edit was already completed")
+        return {"error": "This preview was already processed"}
+    
+    previews_dir = project_dir / "previews"
+    preview_path = previews_dir / f"preview_{req.generation_id}.jpg"
+    if not preview_path.exists():
+        return {"error": "Preview not found"}
+
+    prompt = status.get("ai_prompt", "")
+    if not prompt:
+        return {"error": "Prompt not found in status"}
+
+    # Start background task - clear generation_id immediately to prevent duplicate calls
+    project_manager.update_status(
+        req.project_id,
+        ai_edit_status="processing",
+        ai_edit_progress={"done": 0, "total": 0},
+        ai_generation_id=None,  # Clear immediately to prevent duplicate accepts
+    )
+    print(f"Started processing for generation_id: {req.generation_id}")
+    
+    asyncio.ensure_future(_background_ai_edit(
+        req.project_id,
+        req.generation_id,
+        preview_path,
+        prompt,
+        req.start_frame,
+        req.end_frame,
+        req.interval,
+    ))
+    
+    return {"status": "processing"}
+
+
+@app.post("/ai/edit/reject")
+async def ai_edit_reject(req: AIRejectRequest):
+    """Reject preview and clear it."""
+    project_manager.update_status(
+        req.project_id,
+        ai_generation_id=None,
+        ai_preview_url=None,
+        ai_prompt=None,
+        ai_edit_status="idle",
+    )
+    return {"status": "rejected"}
+
+
+@app.post("/ai/edit/retry")
+async def ai_edit_retry(req: AIRetryRequest):
+    """Retry generation with same prompt."""
+    project_dir = project_manager.get_project_dir(req.project_id)
+    status = project_manager.get_status(req.project_id)
+    
+    if status.get("ai_generation_id") != req.generation_id:
+        return {"error": "Invalid generation_id"}
+    
+    prompt = status.get("ai_prompt", "")
+    if not prompt:
+        return {"error": "Prompt not found"}
+    
+    # Get the original frame index from status
+    frame_index = status.get("ai_original_frame", 1)
+    
+    frames_dir = project_dir / "frames"
+    frame_path = frames_dir / f"frame_{frame_index:04d}.jpg"
+    if not frame_path.exists():
+        return {"error": f"Frame {frame_index} not found"}
+
+    try:
+        preview_bytes = await gemini_service.edit_frame(frame_path, prompt)
+        
+        # Generate new generation ID
+        new_generation_id = str(uuid.uuid4())
+        previews_dir = project_dir / "previews"
+        previews_dir.mkdir(exist_ok=True)
+        preview_path = previews_dir / f"preview_{new_generation_id}.jpg"
+        preview_path.write_bytes(preview_bytes)
+
+        project_manager.update_status(
+            req.project_id,
+            ai_generation_id=new_generation_id,
+            ai_preview_url=f"/preview/{req.project_id}/{new_generation_id}",
+            ai_original_frame=frame_index,
+            ai_edit_status="preview",
+        )
+
+        return {
+            "generation_id": new_generation_id,
+            "preview_url": f"/preview/{req.project_id}/{new_generation_id}",
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+
+
+async def _background_ai_edit(
+    project_id: str,
+    generation_id: str,
+    preview_path: Path,
+    prompt: str,
+    start_frame: int,
+    end_frame: int,
+    interval: int,
+):
+    """Background task: Apply AI transformation to start and end frames only."""
+    try:
+        project_dir = project_manager.get_project_dir(project_id)
+        frames_dir = project_dir / "frames"
+        
+        # Only transform the start and end frames
+        key_frames = [start_frame]
+        if end_frame != start_frame:
+            key_frames.append(end_frame)
+        
+        total = len(key_frames)
+        project_manager.update_status(
+            project_id,
+            ai_edit_progress={"done": 0, "total": total},
+        )
+        
+        # Transform key frames using reference preview
+        for idx, frame_idx in enumerate(key_frames):
+            frame_path = frames_dir / f"frame_{frame_idx:04d}.jpg"
+            if not frame_path.exists():
+                continue
+            
+            print(f"Transforming frame {frame_idx} ({idx + 1}/{total})")
+            
+            # Use reference frame for consistency
+            edited_bytes = await gemini_service.edit_frame_with_reference(
+                frame_path,
+                prompt,
+                preview_path,
+            )
+            
+            # Save transformed frame (overwrite original)
+            frame_path.write_bytes(edited_bytes)
+            
+            project_manager.update_status(
+                project_id,
+                ai_edit_progress={"done": idx + 1, "total": total},
+            )
+        
+        project_manager.update_status(
+            project_id,
+            ai_edit_status="done",
+            ai_edit_progress={"done": total, "total": total},
+            ai_edit_transformed_frames=key_frames,  # Track which frames were transformed
+            ai_generation_id=None,  # Clear generation ID after completion to prevent reuse
+        )
+        print(f"AI edit complete: transformed {total} frames: {key_frames}")
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        project_manager.update_status(
+            project_id,
+            ai_edit_status="error",
+            ai_edit_error=str(e),
+        )
 
 
 # --- Render ---
