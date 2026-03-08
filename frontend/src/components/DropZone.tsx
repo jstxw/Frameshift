@@ -26,14 +26,23 @@ export function DropZone() {
     const res = await fetch(`${API_URL}/upload`, { method: "POST", body: formData });
     const data = await res.json();
 
-    // Save to Zustand store for persistence
-    addProject({
-      projectId: data.project_id,
-      videoName: file.name,
-      uploadedAt: Date.now(),
-      status: "created",
-    });
-    setCurrentProject(data.project_id);
+    // Derive thumbnail from Cloudinary video URL (snapshot at 0s)
+    const thumbnailUrl = data.video_url
+      ? data.video_url
+        .replace("/video/upload/", "/video/upload/so_0,w_640/")
+        .replace(/\.(mp4|mov|webm|avi)$/i, ".jpg")
+      : null;
+
+    // Register project in Supabase (best-effort — don't block navigation on failure)
+    fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: data.project_id,
+        name: file.name,
+        thumbnail_url: thumbnailUrl,
+      }),
+    }).catch(() => { });
 
     // Redirect immediately — editor will kick off extract and poll for readiness
     router.push(`/editor/${data.project_id}`);
@@ -72,11 +81,10 @@ export function DropZone() {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`max-w-2xl mx-auto rounded-2xl p-12 text-center transition-all duration-300 border-2 ${
-        isDragging
+      className={`max-w-2xl mx-auto rounded-2xl p-12 text-center transition-all duration-300 border-2 ${isDragging
           ? "border-solid border-[var(--accent)] bg-[rgba(244,63,94,0.04)] animate-pulse-border"
           : "border-dashed border-[var(--border)]"
-      }`}
+        }`}
     >
       {uploading ? (
         <div className="flex flex-col items-center gap-3">

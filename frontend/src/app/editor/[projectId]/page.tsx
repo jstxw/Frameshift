@@ -9,15 +9,26 @@ import { Toast } from "@/components/editor/Toast";
 import { AIProgressOverlay } from "@/components/editor/AIProgressOverlay";
 import { EditProgressOverlay } from "@/components/editor/EditProgressOverlay";
 import { useEditorState } from "@/hooks/useEditorState";
+import { useProjectSync } from "@/hooks/useProjectSync";
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useVideoStore } from "@/stores/videoStore";
 
 export default function EditorPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const projectId = params.projectId as string;
+  const initialFrame = Number(searchParams.get("frame") ?? 0);
   const setCurrentProject = useVideoStore((state) => state.setCurrentProject);
-  const editor = useEditorState(projectId);
+  const editor = useEditorState(projectId, initialFrame);
+
+  useProjectSync({
+    projectId,
+    currentFrame: editor.currentFrame,
+    videoLoaded: editor.videoLoaded,
+    status: editor.videoLoaded ? "ready" : "created",
+    thumbnailUrl: editor.storageBaseUrl ? `${editor.storageBaseUrl}/frame_0001.jpg` : null,
+  });
 
   // Set current project in Zustand when page loads
   useEffect(() => {
@@ -105,6 +116,7 @@ export default function EditorPage() {
           frameHeight={editor.frameHeight}
           previewFrameUrl={editor.aiPreviewFrameUrl}
           aiEditStatus={editor.aiEditStatus}
+          storageBaseUrl={editor.storageBaseUrl}
           onSelectObject={editor.selectObject}
           onUpload={editor.loadVideo}
           onApplyEdit={editor.applyEditAction}

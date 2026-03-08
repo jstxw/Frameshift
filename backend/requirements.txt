@@ -20,6 +20,9 @@ httpx==0.28.1
 # Cloudinary
 cloudinary==1.42.1
 
+# Auth0 JWT validation
+python-jose[cryptography]==3.5.0
+
 # SAM 2
 sam2==1.1.0
 

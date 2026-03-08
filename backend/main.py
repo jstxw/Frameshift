@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
@@ -10,7 +10,8 @@ import numpy as np
 import uuid
 from pathlib import Path
 
-from services import project_manager, ffmpeg_service, yolo_service, sam2_service, gemini_service, rife_service, local_edit_service
+from services import cloudinary_service, project_manager, ffmpeg_service, yolo_service, sam2_service, gemini_service, rife_service, storage_service
+from services.auth_service import get_current_user
 # film_service  # FILM disabled - using RIFE instead
 
 load_dotenv()
@@ -22,10 +23,10 @@ _cancel_flags: dict[str, bool] = {}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "https://your-vercel-domain.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "Authorization"],
 )
 
 
@@ -37,9 +38,16 @@ async def health():
 # --- Upload ---
 
 @app.post("/upload")
-async def upload_video(file: UploadFile = File(...)):
+async def upload_video(
+    file: UploadFile = File(...),
+    current_user: dict | None = Depends(get_current_user),
+):
     project = project_manager.create_project()
     project_dir = project_manager.get_project_dir(project["project_id"])
+
+    # Store user_id if authenticated
+    if current_user:
+        project_manager.update_status(project["project_id"], user_id=current_user.get("sub"))
 
     video_path = project_dir / "original.mp4"
     with open(video_path, "wb") as f:
@@ -77,10 +85,19 @@ def _background_extract(project_id: str):
     img = Image.open(first_frame)
     frame_width, frame_height = img.size
 
-    # Mark ready immediately so frontend can show frames
+    # Mark ready immediately so frontend can show frames via API
     project_manager.update_status(project_id, status="ready", frame_count=frame_count,
                                    frame_width=frame_width, frame_height=frame_height,
                                    detecting=False, detections={})
+
+    # Upload frames to Supabase Storage for persistent access
+    try:
+        storage_base_url = storage_service.upload_frames(project_id, frames_dir)
+        if storage_base_url:
+            project_manager.update_status(project_id, storage_base_url=storage_base_url)
+            print(f"[extract] Frames uploaded to Supabase Storage: {storage_base_url}")
+    except Exception as e:
+        print(f"[extract] Supabase Storage upload failed (non-fatal): {e}")
 
     # YOLO detection disabled
     # # Run YOLO on all frames, updating detections progressively

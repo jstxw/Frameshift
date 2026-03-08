@@ -54,6 +54,7 @@ interface EditorState {
   aiGenerationId: string | null;
   isAIGenerating: boolean;
   aiEditStatus: "idle" | "preview" | "applying" | "done";
+  storageBaseUrl: string | null;
   aiEditProgress: { done: number; total: number };
   aiEditPhase: "transforming" | "interpolating" | "done" | null;
   aiInterpolationProgress: { done: number; total: number };
@@ -67,7 +68,7 @@ const DEFAULT_EDIT_PARAMS: EditParams = {
   replace: { imageUrl: null },
 };
 
-export function useEditorState(projectId?: string) {
+export function useEditorState(projectId?: string, initialFrame = 0) {
   const updateProject = useVideoStore((state) => state.updateProject);
   const getProject = useVideoStore((state) => state.getProject);
   const [state, setState] = useState<EditorState>({
@@ -79,7 +80,7 @@ export function useEditorState(projectId?: string) {
     frames: [],
     frameWidth: 0,
     frameHeight: 0,
-    currentFrame: 0,
+    currentFrame: initialFrame,
     isPlaying: false,
     allDetections: {},
     detections: [],
@@ -106,6 +107,7 @@ export function useEditorState(projectId?: string) {
     aiGenerationId: null,
     isAIGenerating: false,
     aiEditStatus: "idle",
+    storageBaseUrl: null,
     aiEditProgress: { done: 0, total: 0 },
     aiEditPhase: null,
     aiInterpolationProgress: { done: 0, total: 0 },
@@ -144,7 +146,7 @@ export function useEditorState(projectId?: string) {
 
         const res = await fetch(`${API_URL}/project/${projectId}/status`);
         const status = await res.json();
-        
+
         // Debug logging for segmentation status
         if (status.segment_status !== undefined || status.segmenting !== undefined) {
           console.log("[Frontend] Status poll - segmentation:", {
@@ -158,15 +160,15 @@ export function useEditorState(projectId?: string) {
         // Update segmentation status immediately if present (before other status checks)
         // Also check mask_count to detect completed segmentation
         const hasMasksImmediate = (status.mask_count !== undefined && status.mask_count !== null && status.mask_count > 0);
-        const segmentStatusImmediate = status.segment_status !== undefined 
-          ? status.segment_status 
+        const segmentStatusImmediate = status.segment_status !== undefined
+          ? status.segment_status
           : (hasMasksImmediate ? "done" : undefined);
-          
+
         if (segmentStatusImmediate !== undefined) {
           const segmentingStatus = segmentStatusImmediate === "segmenting";
           const segmentError = status.segment_error;
           const isDone = segmentStatusImmediate === "done";
-          
+
           console.log("[Frontend] Immediate segmentation status update:", {
             segment_status: segmentStatusImmediate,
             mask_count: status.mask_count,
@@ -174,14 +176,14 @@ export function useEditorState(projectId?: string) {
             segmentingStatus,
             hasMasksImmediate,
           });
-          
+
           setState((s) => {
-            const newMaskCount = status.mask_count !== undefined && status.mask_count !== null 
-              ? status.mask_count 
+            const newMaskCount = status.mask_count !== undefined && status.mask_count !== null
+              ? status.mask_count
               : s.maskCount;
             // Increment maskVersion when done to force refresh
             const shouldIncrementMaskVersion = isDone && (newMaskCount > s.maskCount || s.maskVersion === 0);
-            
+
             console.log("[Frontend] Updating segmentation state (immediate):", {
               oldMaskCount: s.maskCount,
               newMaskCount,
@@ -190,7 +192,7 @@ export function useEditorState(projectId?: string) {
               isSegmenting: segmentingStatus,
               isDone,
             });
-            
+
             return {
               ...s,
               isSegmenting: segmentingStatus,
@@ -232,7 +234,7 @@ export function useEditorState(projectId?: string) {
           if (frameCount > 0) {
             // Update Zustand store with video info
             const project = getProject(projectId);
-            
+
             updateProject(projectId, {
               status: status.status,
               frameCount: frameCount,
@@ -244,10 +246,10 @@ export function useEditorState(projectId?: string) {
             const maskCountFromStatus = status.mask_count !== undefined && status.mask_count !== null ? status.mask_count : 0;
             const hasMasks = maskCountFromStatus > 0;
             const isSegmenting = status.segment_status === "segmenting" || (status.segment_status === undefined && !!status.segmenting);
-            
+
             // If masks exist but no segment_status, assume segmentation was done previously
-            const segmentStatus = status.segment_status !== undefined 
-              ? status.segment_status 
+            const segmentStatus = status.segment_status !== undefined
+              ? status.segment_status
               : (hasMasks ? "done" : undefined);
 
             setState((s) => ({
@@ -265,6 +267,7 @@ export function useEditorState(projectId?: string) {
               // Use segmentStatus to determine isSegmenting - only true if actively segmenting
               isSegmenting: segmentStatus === "segmenting",
               maskCount: maskCountFromStatus,
+              storageBaseUrl: status.storage_base_url || s.storageBaseUrl,
             }));
 
             // Store all per-frame detections
@@ -278,7 +281,7 @@ export function useEditorState(projectId?: string) {
               const segmentingStatus = segmentStatus === "segmenting";
               const segmentError = status.segment_error;
               const isDone = segmentStatus === "done";
-              
+
               console.log("[Frontend] Segmentation status update:", {
                 segment_status: segmentStatus,
                 mask_count: status.mask_count,
@@ -286,15 +289,15 @@ export function useEditorState(projectId?: string) {
                 segmentingStatus,
                 hasMasks,
               });
-              
+
               setState((s) => {
-                const newMaskCount = status.mask_count !== undefined && status.mask_count !== null 
-                  ? status.mask_count 
+                const newMaskCount = status.mask_count !== undefined && status.mask_count !== null
+                  ? status.mask_count
                   : s.maskCount;
                 // Increment maskVersion when segmentation completes to force mask refresh
                 // Also increment on page reload if masks exist to ensure display refreshes
                 const shouldIncrementMaskVersion = isDone && (newMaskCount > s.maskCount || s.maskVersion === 0);
-                
+
                 console.log("[Frontend] Updating segmentation state:", {
                   oldMaskCount: s.maskCount,
                   newMaskCount,
@@ -302,7 +305,7 @@ export function useEditorState(projectId?: string) {
                   newMaskVersion: shouldIncrementMaskVersion ? s.maskVersion + 1 : s.maskVersion,
                   isSegmenting: segmentingStatus,
                 });
-                
+
                 return {
                   ...s,
                   isSegmenting: segmentingStatus,
@@ -334,8 +337,8 @@ export function useEditorState(projectId?: string) {
                   toastMessage: editDone && s.isProcessing
                     ? "Edit applied successfully"
                     : editError && s.isProcessing
-                    ? `Edit failed: ${status.edit_error || "Unknown error"}`
-                    : s.toastMessage,
+                      ? `Edit failed: ${status.edit_error || "Unknown error"}`
+                      : s.toastMessage,
                 };
               });
             }
@@ -354,7 +357,7 @@ export function useEditorState(projectId?: string) {
                   showToast: (refineDone || refineError) && s.isRefining ? true : s.showToast,
                   toastMessage: refineDone && s.isRefining ? "Frame refined successfully"
                     : refineError && s.isRefining ? `Refinement failed: ${status.refine_error || "Unknown error"}`
-                    : s.toastMessage,
+                      : s.toastMessage,
                 };
               });
             }
@@ -366,7 +369,7 @@ export function useEditorState(projectId?: string) {
               const aiEditPhase = status.ai_edit_phase || null;
               const isDone = status.ai_edit_status === "done" || status.ai_edit_status === "error";
               const transformedFrames = status.ai_edit_transformed_frames || [];
-              
+
               // Track transformed frames for per-frame versioning
               // This allows us to only refresh frames that were actually changed
               if (isDone && transformedFrames.length > 0) {
@@ -379,13 +382,13 @@ export function useEditorState(projectId?: string) {
                   }
                 }));
               }
-              
+
               setState((s) => ({
                 ...s,
-                aiEditStatus: status.ai_edit_status === "processing" ? "applying" : 
-                             status.ai_edit_status === "done" ? "done" : 
-                             status.ai_edit_status === "preview" ? "preview" : 
-                             status.ai_edit_status === "error" ? "idle" : s.aiEditStatus,
+                aiEditStatus: status.ai_edit_status === "processing" ? "applying" :
+                  status.ai_edit_status === "done" ? "done" :
+                    status.ai_edit_status === "preview" ? "preview" :
+                      status.ai_edit_status === "error" ? "idle" : s.aiEditStatus,
                 aiEditProgress: aiProgress,
                 aiEditPhase: aiEditPhase,
                 aiInterpolationProgress: aiInterpolationProgress,
@@ -404,14 +407,14 @@ export function useEditorState(projectId?: string) {
 
             // Continue polling if any operation is in progress
             const shouldStopPolling = status.status === "ready" &&
-                                     !status.detecting &&
-                                     !status.segmenting &&
-                                     status.edit_status !== "uploading" &&
-                                     status.edit_status !== "editing" &&
-                                     status.refine_status !== "processing" &&
-                                     status.ai_edit_status !== "processing" &&
-                                     status.ai_edit_status !== "applying";
-            
+              !status.detecting &&
+              !status.segmenting &&
+              status.edit_status !== "uploading" &&
+              status.edit_status !== "editing" &&
+              status.refine_status !== "processing" &&
+              status.ai_edit_status !== "processing" &&
+              status.ai_edit_status !== "applying";
+
             if (shouldStopPolling) {
               if (pollingRef.current) {
                 clearInterval(pollingRef.current);
@@ -514,7 +517,7 @@ export function useEditorState(projectId?: string) {
                 showToast: (editDone || editError) && s.isProcessing ? true : s.showToast,
                 toastMessage: editDone && s.isProcessing ? "Edit applied successfully"
                   : editError && s.isProcessing ? `Edit failed: ${status.edit_error || "Unknown error"}`
-                  : s.toastMessage,
+                    : s.toastMessage,
               };
             });
           }
@@ -533,7 +536,7 @@ export function useEditorState(projectId?: string) {
                 showToast: (refineDone || refineError) && s.isRefining ? true : s.showToast,
                 toastMessage: refineDone && s.isRefining ? "Frame refined successfully"
                   : refineError && s.isRefining ? `Refinement failed: ${status.refine_error || "Unknown error"}`
-                  : s.toastMessage,
+                    : s.toastMessage,
               };
             });
           }
@@ -544,8 +547,8 @@ export function useEditorState(projectId?: string) {
             setState((s) => ({
               ...s,
               aiEditStatus: status.ai_edit_status === "processing" ? "applying" :
-                           status.ai_edit_status === "done" ? "done" :
-                           status.ai_edit_status === "error" ? "idle" : s.aiEditStatus,
+                status.ai_edit_status === "done" ? "done" :
+                  status.ai_edit_status === "error" ? "idle" : s.aiEditStatus,
               aiEditProgress: status.ai_edit_progress || s.aiEditProgress,
               aiEditPhase: status.ai_edit_phase || s.aiEditPhase,
               aiInterpolationProgress: status.ai_interpolation_progress || s.aiInterpolationProgress,
@@ -722,10 +725,10 @@ export function useEditorState(projectId?: string) {
           restartPolling();
         });
 
-        return { 
-          ...s, 
-          isProcessing: true, 
-          selectedObjectId: null, 
+        return {
+          ...s,
+          isProcessing: true,
+          selectedObjectId: null,
           showEditPanel: false,
           changeMarkers: [...s.changeMarkers, newMarker],
         };
@@ -758,8 +761,8 @@ export function useEditorState(projectId?: string) {
         restartPolling();
       });
 
-      return { 
-        ...s, 
+      return {
+        ...s,
         isProcessing: true,
         changeMarkers: [...s.changeMarkers, newMarker],
       };
@@ -808,7 +811,7 @@ export function useEditorState(projectId?: string) {
       // Update edit range to propagate from marker frame to end
       const startFrame = newFrame;
       const endFrame = s.editRangeEnd > 0 ? s.editRangeEnd : s.frames.length - 1;
-      
+
       // Trigger propagation based on edit type
       if (marker.editType === "refine") {
         // For refine, propagate the realistic enhancement
@@ -833,7 +836,7 @@ export function useEditorState(projectId?: string) {
           start_frame: startFrame + 1,
           end_frame: endFrame + 1,
         };
-        
+
         fetch(`${API_URL}/edit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1053,9 +1056,9 @@ export function useEditorState(projectId?: string) {
           aiEditPhase: "transforming" as const,
           aiInterpolationProgress: { done: 0, total: 0 },
         };
-        console.log("[acceptAIGeneration] New state:", { 
-          aiEditStatus: newState.aiEditStatus, 
-          aiEditProgress: newState.aiEditProgress 
+        console.log("[acceptAIGeneration] New state:", {
+          aiEditStatus: newState.aiEditStatus,
+          aiEditProgress: newState.aiEditProgress
         });
         return newState;
       });
@@ -1095,7 +1098,7 @@ export function useEditorState(projectId?: string) {
             // Polling will continue to update the status
             return;
           }
-          
+
           console.error("Accept error from backend:", data.error);
           acceptInProgressRef.current = false; // Reset ref on error
           setState((prev) => ({
