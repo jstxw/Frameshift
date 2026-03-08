@@ -2,7 +2,7 @@
 
 By Bryan Lin, Justin Wang, Daniel Zhao, and Krish Punjabi.
 
-AI-powered video editor. Upload a video, click an object, apply edits — changes propagate across every frame automatically.
+AI-powered video editor. Upload a video, click an object, apply edits — changes propagate across every frame automatically. **Cloudinary** is used for image and video storage and for per-frame transforms (including thumbnails).
 
 ## What it does
 
@@ -20,7 +20,7 @@ AI-powered video editor. Upload a video, click an object, apply edits — change
 | Backend | FastAPI, Python |
 | Object detection | YOLOv11 (Ultralytics) |
 | Segmentation | SAM 2 |
-| Storage & media | Cloudinary |
+| Storage & media | Cloudinary (image/video storage, transforms, thumbnails) |
 | Database | Supabase (Postgres) |
 | Frame processing | FFmpeg |
 
@@ -99,9 +99,9 @@ npm run dev
 
 App runs at `http://localhost:3000`.
 
-## Cloudinary Transformations
+## Cloudinary (storage, transforms, thumbnails)
 
-FrameShift uses Cloudinary's transformation pipeline to apply per-frame edits. All transformations are built as URLs via `CloudinaryImage.build_url()` and downloaded locally before FFmpeg re-encodes the final video.
+FrameShift uses **Cloudinary** for image and video storage and for per-frame transforms (including thumbnails). Uploaded videos and extracted frames are stored in Cloudinary; the transformation pipeline applies edits via `CloudinaryImage.build_url()`. Thumbnails for the dashboard are generated and served from Cloudinary. All transformation URLs are built in the backend and results are downloaded locally before FFmpeg re-encodes the final video.
 
 ### Edit types (object-aware, use SAM 2 mask)
 
