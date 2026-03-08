@@ -36,24 +36,34 @@ export default function EditorPage() {
       setCurrentProject(projectId);
     }
   }, [projectId, setCurrentProject]);
-  const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const lastFrameTimeRef = useRef<number>(0);
+  const currentFrameRef = useRef(editor.currentFrame);
+  const framesLengthRef = useRef(editor.frames.length);
   const [isDark, setIsDark] = useState(false);
 
-  // Playback loop
+  // Keep refs in sync without triggering effect restarts
+  currentFrameRef.current = editor.currentFrame;
+  framesLengthRef.current = editor.frames.length;
+
+  // Playback loop using RAF to avoid restarting on every frame change
   useEffect(() => {
-    if (editor.isPlaying && editor.videoLoaded) {
-      playIntervalRef.current = setInterval(() => {
-        editor.setCurrentFrame(
-          editor.currentFrame >= editor.frames.length - 1
-            ? 0
-            : editor.currentFrame + 1
-        );
-      }, 1000 / editor.fps);
-    }
-    return () => {
-      if (playIntervalRef.current) clearInterval(playIntervalRef.current);
+    if (!editor.isPlaying || !editor.videoLoaded) return;
+    const frameInterval = 1000 / editor.fps;
+    const tick = (now: number) => {
+      if (now - lastFrameTimeRef.current >= frameInterval) {
+        lastFrameTimeRef.current = now;
+        const next = currentFrameRef.current >= framesLengthRef.current - 1
+          ? 0
+          : currentFrameRef.current + 1;
+        editor.setCurrentFrame(next);
+      }
+      rafRef.current = requestAnimationFrame(tick);
     };
-  }, [editor.isPlaying, editor.videoLoaded, editor.currentFrame, editor.fps, editor.frames.length, editor.setCurrentFrame]);
+    lastFrameTimeRef.current = performance.now();
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [editor.isPlaying, editor.videoLoaded, editor.fps, editor.setCurrentFrame]);
 
   // Keyboard shortcuts
   useEffect(() => {
