@@ -69,13 +69,25 @@ def _pad_to_multiple(img: torch.Tensor, multiple: int = 32):
     return img, h, w
 
 
+def _frame_index_from_path(path: Path) -> int:
+    """Extract frame number from path like frame_0011.jpg. Default 0 if unparseable."""
+    import re
+    name = path.stem
+    m = re.search(r"frame_(\d+)", name, re.IGNORECASE)
+    return int(m.group(1)) if m else 0
+
+
 def interpolate_pair(frame1_path: Path, frame2_path: Path, output_paths: list[Path]):
     """Generate N intermediate frames between frame1 and frame2.
 
-    output_paths: list of paths where interpolated frames should be saved.
-    For example, if frame1=10 and frame2=25, output_paths would be paths for frames 11-24.
+    frame1_path: earlier key frame (e.g. frame_0010.jpg).
+    frame2_path: later key frame (e.g. frame_0025.jpg).
+    output_paths: paths for in-between frames, in ascending temporal order (e.g. 11-24).
+                  Sorted by frame index before use so the i-th blend is written to the correct file.
     """
     model, device = _get_model()
+    # Ensure temporal order: first path = frame right after frame1, last = frame right before frame2
+    output_paths = sorted(output_paths, key=_frame_index_from_path)
     n = len(output_paths)
     if n == 0:
         return

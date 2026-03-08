@@ -94,6 +94,8 @@ export default function EditorPage() {
         onToggleTheme={() => setIsDark((d) => !d)}
         editApplied={editor.editVersion > 0}
         onUndo={editor.undoEdit}
+        onSave={editor.exportToMp4}
+        isExporting={editor.isExporting}
       />
 
       <div className="flex-1 flex overflow-hidden">

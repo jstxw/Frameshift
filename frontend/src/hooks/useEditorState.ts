@@ -61,6 +61,7 @@ interface EditorState {
   aiInterpolationProgress: { done: number; total: number };
   isRefining: boolean;
   changeMarkers: Array<{ id: string; frame: number; editType: string; timestamp: number }>;
+  isExporting: boolean;
 }
 
 const DEFAULT_EDIT_PARAMS: EditParams = {
@@ -114,6 +115,7 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
     aiInterpolationProgress: { done: 0, total: 0 },
     isRefining: false,
     changeMarkers: [],
+    isExporting: false,
   });
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -774,6 +776,10 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
     setState((s) => {
       if (!s.projectId) return s;
 
+      // Use slider range if set, otherwise use current frame only
+      const startFrame = s.editRangeStart >= 0 ? s.editRangeStart + 1 : s.currentFrame + 1;
+      const endFrame = s.editRangeEnd > 0 ? s.editRangeEnd + 1 : s.currentFrame + 1;
+
       // Log refine change
       const { addLog } = useChangeLogStore.getState();
       addLog(s.projectId, {
@@ -800,6 +806,8 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
         body: JSON.stringify({
           project_id: s.projectId,
           frame_index: s.currentFrame + 1,
+          start_frame: startFrame,
+          end_frame: endFrame,
         }),
       }).then(() => {
         restartPolling();
@@ -1080,8 +1088,9 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
 
       acceptInProgressRef.current = true;
       const generationId = s.aiGenerationId;
-      const startFrame = s.currentFrame + 1;
-      const endFrame = s.frames.length;
+      // Use slider range if set, otherwise use current frame only
+      const startFrame = s.editRangeStart >= 0 ? s.editRangeStart + 1 : s.currentFrame + 1;
+      const endFrame = s.editRangeEnd > 0 ? s.editRangeEnd + 1 : s.currentFrame + 1;
       const interval = 8;
 
       fetch(`${API_URL}/ai/edit/accept`, {
@@ -1206,6 +1215,47 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
     [state.detections, state.selectedObjectId]
   );
 
+  const exportToMp4 = useCallback(async () => {
+    const pid = projectId ?? state.projectId;
+    if (!pid || !state.videoLoaded) {
+      setState((s) => ({ ...s, showToast: true, toastMessage: "No project or video loaded" }));
+      return;
+    }
+    setState((s) => ({ ...s, isExporting: true }));
+    try {
+      const res = await fetch(`${API_URL}/render`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: pid }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setState((s) => ({ ...s, isExporting: false, showToast: true, toastMessage: data.error }));
+        return;
+      }
+      const videoRes = await fetch(`${API_URL}/render/${pid}/video`);
+      if (!videoRes.ok) {
+        setState((s) => ({ ...s, isExporting: false, showToast: true, toastMessage: "Failed to download video" }));
+        return;
+      }
+      const blob = await videoRes.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(state.videoName || "export").replace(/\.[^.]+$/, "")}.mp4`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setState((s) => ({ ...s, isExporting: false, showToast: true, toastMessage: "Video exported as MP4" }));
+    } catch (err) {
+      setState((s) => ({
+        ...s,
+        isExporting: false,
+        showToast: true,
+        toastMessage: err instanceof Error ? err.message : "Export failed",
+      }));
+    }
+  }, [projectId, state.projectId, state.videoLoaded, state.videoName]);
+
   return {
     ...state,
     selectedObject,
@@ -1237,5 +1287,7 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
     editStatus: state.editStatus,
     changeMarkers: state.changeMarkers,
     handleMarkerDrag,
+    exportToMp4,
+    isExporting: state.isExporting,
   };
 }

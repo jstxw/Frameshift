@@ -67,7 +67,9 @@ export function EditorTimeline({
       if (!trackRef.current || !videoLoaded) return;
       const rect = trackRef.current.getBoundingClientRect();
       const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      onFrameChange(Math.round(pct * (totalFrames - 1)));
+      const clickedFrame = Math.round(pct * (totalFrames - 1));
+      // Only update the current frame (red cursor) - don't move green/blue delimiters
+      onFrameChange(clickedFrame);
     },
     [totalFrames, videoLoaded, onFrameChange]
   );
@@ -112,7 +114,7 @@ export function EditorTimeline({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [editRangeStart, editRangeEnd, maxFrame, onEditRangeChange]
+    [editRangeStart, editRangeEnd, maxFrame, onEditRangeChange, onFrameChange]
   );
 
   return (
@@ -336,18 +338,40 @@ export function EditorTimeline({
                 }}
               />
             )}
+            {/* Current frame cursor (red - shows actual canvas) */}
             {videoLoaded && (
               <div
-                className="absolute top-0 left-0 h-full transition-all duration-75"
-                style={{ width: `${progress}%`, background: "rgba(244,63,94,0.12)" }}
-              />
-            )}
-            {videoLoaded && (
-              <div
-                className="absolute top-0 h-full w-0.5 bg-[var(--accent)] transition-all duration-75 z-10"
-                style={{ left: `${progress}%` }}
+                className="absolute top-0 h-full w-0.5 transition-all duration-75 z-10"
+                style={{ 
+                  left: `${progress}%`,
+                  background: "rgba(244, 63, 94, 0.9)", // Red for current frame
+                }}
               >
-                <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-2 h-2 bg-[var(--accent)] rotate-45 rounded-sm" />
+                <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-2 h-2 rotate-45 rounded-sm" style={{ background: "rgba(244, 63, 94, 1)" }} />
+              </div>
+            )}
+            {/* Start frame cursor (green - delimiter) */}
+            {videoLoaded && editRangeStart >= 0 && (
+              <div
+                className="absolute top-0 h-full w-0.5 transition-all duration-75 z-10"
+                style={{ 
+                  left: `${rangeStartPct}%`,
+                  background: "rgba(34, 197, 94, 0.8)", // Green for start
+                }}
+              >
+                <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-2 h-2 rotate-45 rounded-sm" style={{ background: "rgba(34, 197, 94, 1)" }} />
+              </div>
+            )}
+            {/* End frame cursor (blue - delimiter) */}
+            {videoLoaded && editRangeEnd > 0 && (
+              <div
+                className="absolute top-0 h-full w-0.5 transition-all duration-75 z-10"
+                style={{ 
+                  left: `${rangeEndPct}%`,
+                  background: "rgba(59, 130, 246, 0.8)", // Blue for end
+                }}
+              >
+                <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-2 h-2 rotate-45 rounded-sm" style={{ background: "rgba(59, 130, 246, 1)" }} />
               </div>
             )}
             {isProcessing && (

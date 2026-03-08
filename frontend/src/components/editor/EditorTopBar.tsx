@@ -12,6 +12,9 @@ interface EditorTopBarProps {
   onToggleTheme: () => void;
   editApplied?: boolean;
   onUndo?: () => void;
+  /** When provided, Save compiles and exports video as MP4 (render + download). */
+  onSave?: () => void | Promise<void>;
+  isExporting?: boolean;
 }
 
 export function EditorTopBar({
@@ -22,18 +25,25 @@ export function EditorTopBar({
   onToggleTheme,
   editApplied,
   onUndo,
+  onSave,
+  isExporting = false,
 }: EditorTopBarProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showSignInPrompt, setShowSignInPrompt] = useState(false);
   const { user } = useUser();
 
-  function handleSave() {
+  async function handleSave() {
+    if (onSave) {
+      await onSave();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      return;
+    }
     if (!user) {
       setShowSignInPrompt(true);
       return;
     }
-    // Already auto-saving via useProjectSync — just show confirmation
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
@@ -109,8 +119,9 @@ export function EditorTopBar({
         )}
         {videoLoaded && (
           <button
-            onClick={handleSave}
-            className="flex items-center gap-1.5 px-3 h-9 rounded-xl text-sm font-semibold transition-all hover:scale-105"
+            onClick={() => handleSave()}
+            disabled={isExporting}
+            className="flex items-center gap-1.5 px-3 h-9 rounded-xl text-sm font-semibold transition-all hover:scale-105 disabled:opacity-70 disabled:pointer-events-none"
             style={{
               background: saved ? "rgba(16,185,129,0.15)" : "rgba(244,63,94,0.15)",
               color: saved ? "#10B981" : "var(--accent)",
@@ -118,7 +129,7 @@ export function EditorTopBar({
             }}
           >
             {saved ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
-            {saved ? "Saved" : "Save"}
+            {isExporting ? "Exporting…" : saved ? "Saved" : "Save"}
           </button>
         )}
 
