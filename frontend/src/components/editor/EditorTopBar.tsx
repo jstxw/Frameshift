@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Play, ChevronLeft, Sun, Moon, Save, Check, Undo2 } from "lucide-react";
 import { useUser } from "@auth0/nextjs-auth0/client";
 
@@ -31,7 +31,42 @@ export function EditorTopBar({
   const [isEditing, setIsEditing] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showSignInPrompt, setShowSignInPrompt] = useState(false);
-  const { user } = useUser();
+  const [showExitPrompt, setShowExitPrompt] = useState(false);
+  const allowGuestExitRef = useRef(false);
+  const { user, isLoading: isUserLoading } = useUser();
+
+  useEffect(() => {
+    if (isUserLoading || user) return;
+
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      if (allowGuestExitRef.current) return;
+      event.preventDefault();
+      event.returnValue = true;
+    };
+    const warnOnBrowserBack = () => {
+      if (allowGuestExitRef.current) return;
+      window.history.pushState({ frameshiftGuestExitGuard: true }, "", window.location.href);
+      setShowExitPrompt(true);
+    };
+
+    window.history.pushState({ frameshiftGuestExitGuard: true }, "", window.location.href);
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    window.addEventListener("popstate", warnOnBrowserBack);
+    return () => {
+      window.removeEventListener("beforeunload", warnBeforeLeaving);
+      window.removeEventListener("popstate", warnOnBrowserBack);
+    };
+  }, [isUserLoading, user]);
+
+  function handleEditorExit(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (isUserLoading || user) return;
+    event.preventDefault();
+    setShowExitPrompt(true);
+  }
+
+  function allowGuestExit() {
+    allowGuestExitRef.current = true;
+  }
 
   async function handleSave() {
     if (onSave) {
@@ -60,6 +95,7 @@ export function EditorTopBar({
       <div className="flex items-center gap-3">
         <a
           href="/"
+          onClick={handleEditorExit}
           className="flex items-center gap-2 transition-opacity hover:opacity-70"
           style={{ color: "var(--ed-icon)" }}
         >
@@ -167,6 +203,7 @@ export function EditorTopBar({
             <div className="flex flex-col gap-3">
               <a
                 href={`/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`}
+                onClick={allowGuestExit}
                 className="bg-[#F43F5E] hover:bg-[#E11D48] text-white font-semibold text-sm px-6 py-3 rounded-xl transition-all duration-300 hover:scale-[1.02]"
               >
                 Sign in / Create account
@@ -177,6 +214,54 @@ export function EditorTopBar({
               >
                 Continue without saving
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Guest exit warning */}
+      {showExitPrompt && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setShowExitPrompt(false)}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="guest-exit-title"
+            className="bg-white rounded-2xl p-8 max-w-sm w-full mx-4 text-center shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="w-14 h-14 rounded-2xl bg-[rgba(244,63,94,0.1)] flex items-center justify-center mx-auto mb-4">
+              <Save className="w-6 h-6 text-[#F43F5E]" />
+            </div>
+            <h2 id="guest-exit-title" className="text-xl font-[550] text-[#171717] mb-2">
+              Are you sure you want to leave?
+            </h2>
+            <p className="text-[#6B7280] text-sm mb-6">
+              Create a free account to save your project before you go.
+            </p>
+            <div className="flex flex-col gap-3">
+              <a
+                href={`/auth/login?screen_hint=signup&returnTo=${encodeURIComponent(window.location.pathname)}`}
+                onClick={allowGuestExit}
+                className="bg-[#F43F5E] hover:bg-[#E11D48] text-white font-semibold text-sm px-6 py-3 rounded-xl transition-all duration-300 hover:scale-[1.02]"
+              >
+                Create account to save
+              </a>
+              <button
+                onClick={() => setShowExitPrompt(false)}
+                className="text-sm font-medium text-[#171717] hover:text-[#F43F5E] transition-colors"
+              >
+                Stay in editor
+              </button>
+              <a
+                href="/"
+                onClick={allowGuestExit}
+                className="text-sm text-[#6B7280] hover:text-[#171717] transition-colors"
+              >
+                Leave without saving
+              </a>
             </div>
           </div>
         </div>

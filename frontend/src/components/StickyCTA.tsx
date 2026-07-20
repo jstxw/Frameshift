@@ -12,6 +12,7 @@ import {
 export function StickyCTA() {
   const [visible, setVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -31,10 +32,11 @@ export function StickyCTA() {
 
   async function uploadFile(file: File) {
     setUploading(true);
+    setStatus("Checking video length...");
     setError("");
 
     try {
-      const data = await uploadProjectVideo(file);
+      const data = await uploadProjectVideo(file, setStatus);
 
       addProject({
         projectId: data.project_id,
@@ -78,7 +80,7 @@ export function StickyCTA() {
           {uploading ? (
             <div className="flex items-center gap-2 text-[var(--fg-muted)] text-sm">
               <Loader2 className="w-4 h-4 animate-spin text-[var(--accent)]" />
-              Uploading…
+              <span role="status" aria-live="polite">{status}</span>
             </div>
           ) : (
             <>

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth0 } from "@/lib/auth0";
 import { supabaseAdmin } from "@/lib/supabase";
 import {
-  hydrateModalCache,
   objectExists,
   originalPath,
 } from "@/lib/project-storage";
@@ -56,26 +55,14 @@ export async function POST(
     }
   }
 
-  const hydration = await hydrateModalCache({
-    projectId,
-    sourcePath: storedOriginal,
-    userId: project?.user_id || null,
-    originalStoragePath: storedOriginal,
-  });
-
-  if (project) {
-    const { error } = await supabaseAdmin
-      .from("projects")
-      .update({ status: hydration.available ? "processing" : "stored" })
-      .eq("project_id", projectId)
-      .eq("user_id", project.user_id);
-    if (error) console.warn("Could not update project compute status", error.message);
-  }
-
   return NextResponse.json({
     project_id: projectId,
     stored: true,
-    compute_available: hydration.available,
-    compute_error: hydration.available ? null : hydration.error,
+    // The editor's resume request hydrates the disposable GPU cache. Keeping
+    // that cold-start work out of upload completion lets the browser navigate
+    // as soon as durable storage has confirmed the file.
+    compute_available: false,
+    compute_pending: true,
+    compute_error: null,
   });
 }

@@ -305,6 +305,15 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
         if (status.status === "ready" || status.status === "extracting") {
           const frameCount = status.frame_count || 0;
           if (frameCount > 0) {
+            const reportedFps = Number(status.fps);
+            const fps = Number.isFinite(reportedFps) && reportedFps > 0
+              ? reportedFps
+              : 30;
+            const reportedDuration = Number(status.duration);
+            const duration = Number.isFinite(reportedDuration) && reportedDuration > 0
+              ? reportedDuration
+              : frameCount / fps;
+
             // Update Zustand store with video info
             const project = getProject(projectId);
 
@@ -330,8 +339,8 @@ export function useEditorState(projectId?: string, initialFrame = 0) {
               projectId,
               videoLoaded: true,
               videoName: project?.videoName || projectId,
-              fps: 30,
-              duration: frameCount / 30,
+              fps,
+              duration,
               frames: generateFrames(frameCount),
               frameWidth: status.frame_width || 0,
               frameHeight: status.frame_height || 0,
