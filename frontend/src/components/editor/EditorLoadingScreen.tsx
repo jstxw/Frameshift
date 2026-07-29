@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 const CELLS = 8;
+const SLOW_NOTICE_DELAY_MS = 8_000;
 
 /**
  * Full-screen overlay shown between upload and the editor being ready.
@@ -12,6 +13,7 @@ const CELLS = 8;
  */
 export function EditorLoadingScreen({ show }: { show: boolean }) {
   const [mounted, setMounted] = useState(show);
+  const [showSlowNotice, setShowSlowNotice] = useState(false);
 
   useEffect(() => {
     if (show) {
@@ -20,6 +22,15 @@ export function EditorLoadingScreen({ show }: { show: boolean }) {
     }
     const t = setTimeout(() => setMounted(false), 300);
     return () => clearTimeout(t);
+  }, [show]);
+
+  useEffect(() => {
+    if (!show) {
+      setShowSlowNotice(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowSlowNotice(true), SLOW_NOTICE_DELAY_MS);
+    return () => clearTimeout(timer);
   }, [show]);
 
   if (!mounted) return null;
@@ -55,6 +66,16 @@ export function EditorLoadingScreen({ show }: { show: boolean }) {
         <p className="text-sm" style={{ color: "var(--ed-subtle, #6b7280)" }}>
           Extracting frames&hellip;
         </p>
+        {showSlowNotice && (
+          <p
+            className="mt-3 max-w-md px-6 text-center text-sm leading-relaxed"
+            style={{ color: "var(--ed-subtle, #6b7280)" }}
+          >
+            Sorry this is taking longer than usual. FrameShift runs on an
+            on-demand GPU editor, which may need a moment to warm up. Thanks
+            for your patience.
+          </p>
+        )}
       </div>
     </div>
   );

@@ -184,13 +184,16 @@ export function EditorCanvas({
     return <EmptyCanvas onUpload={onUpload} />;
   }
 
-  if (isPlaying && storedVideoUrl) {
+  if (isPlaying && storedVideoUrl && projectId) {
     return (
       <SynchronizedPlaybackCanvas
+        projectId={projectId}
         videoUrl={storedVideoUrl}
         currentFrame={currentFrame}
         totalFrames={totalFrames}
         fps={fps}
+        showMask={maskCount > 0 && segmentStatus === "done"}
+        maskVersion={maskVersion}
         onFrameChange={onPlaybackFrame}
         onEnded={onPlaybackEnded}
       />
@@ -437,23 +440,48 @@ function StoredVideoCanvas({ videoUrl }: { videoUrl: string }) {
 }
 
 function SynchronizedPlaybackCanvas({
+  projectId,
   videoUrl,
   currentFrame,
   totalFrames,
   fps,
+  showMask,
+  maskVersion,
   onFrameChange,
   onEnded,
 }: {
+  projectId: string;
   videoUrl: string;
   currentFrame: number;
   totalFrames: number;
   fps: number;
+  showMask: boolean;
+  maskVersion: number;
   onFrameChange?: (frame: number) => void;
   onEnded?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const lastReportedFrameRef = useRef(currentFrame);
+  const videoFrameCallbackRef = useRef<number | null>(null);
+  const maskPreloadCacheRef = useRef<Map<number, HTMLImageElement>>(new Map());
+  const [playbackFrame, setPlaybackFrame] = useState(currentFrame);
   const safeFps = Math.max(fps, 1);
+
+  const maskUrl = useCallback((frame: number) => (
+    `${API_URL}/mask-outline/${projectId}/${frame + 1}?v=${maskVersion}`
+  ), [maskVersion, projectId]);
+
+  const reportFrameAtTime = useCallback((mediaTime: number) => {
+    if (totalFrames <= 0) return;
+    const frame = Math.min(
+      totalFrames - 1,
+      Math.max(0, Math.floor(mediaTime * safeFps)),
+    );
+    if (frame === lastReportedFrameRef.current) return;
+    lastReportedFrameRef.current = frame;
+    setPlaybackFrame(frame);
+    onFrameChange?.(frame);
+  }, [onFrameChange, safeFps, totalFrames]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -488,16 +516,56 @@ function SynchronizedPlaybackCanvas({
     }
   }, [currentFrame, safeFps]);
 
+  useEffect(() => {
+    setPlaybackFrame(currentFrame);
+    lastReportedFrameRef.current = currentFrame;
+  }, [currentFrame, videoUrl]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || typeof video.requestVideoFrameCallback !== "function") return;
+
+    let active = true;
+    const reportDecodedFrame: VideoFrameRequestCallback = (_now, metadata) => {
+      reportFrameAtTime(metadata.mediaTime);
+      if (active && !video.ended) {
+        videoFrameCallbackRef.current = video.requestVideoFrameCallback(reportDecodedFrame);
+      }
+    };
+    videoFrameCallbackRef.current = video.requestVideoFrameCallback(reportDecodedFrame);
+
+    return () => {
+      active = false;
+      if (videoFrameCallbackRef.current !== null) {
+        video.cancelVideoFrameCallback(videoFrameCallbackRef.current);
+        videoFrameCallbackRef.current = null;
+      }
+    };
+  }, [reportFrameAtTime, videoUrl]);
+
+  useEffect(() => {
+    maskPreloadCacheRef.current.clear();
+  }, [maskVersion, projectId]);
+
+  useEffect(() => {
+    if (!showMask || totalFrames <= 0) return;
+
+    // Keep a short rolling window decoded ahead of playback. Each outline has
+    // an immutable cache URL, so revisiting or scrubbing a frame is immediate.
+    const lastFrameToPreload = Math.min(totalFrames - 1, playbackFrame + 12);
+    for (let frame = playbackFrame; frame <= lastFrameToPreload; frame += 1) {
+      if (maskPreloadCacheRef.current.has(frame)) continue;
+      const image = new Image();
+      image.decoding = "async";
+      image.src = maskUrl(frame);
+      maskPreloadCacheRef.current.set(frame, image);
+    }
+  }, [maskUrl, playbackFrame, showMask, totalFrames]);
+
   const reportCurrentFrame = () => {
     const video = videoRef.current;
-    if (!video || totalFrames <= 0) return;
-    const frame = Math.min(
-      totalFrames - 1,
-      Math.max(0, Math.floor(video.currentTime * safeFps)),
-    );
-    if (frame === lastReportedFrameRef.current) return;
-    lastReportedFrameRef.current = frame;
-    onFrameChange?.(frame);
+    if (!video) return;
+    reportFrameAtTime(video.currentTime);
   };
 
   return (
@@ -517,8 +585,17 @@ function SynchronizedPlaybackCanvas({
           onTimeUpdate={reportCurrentFrame}
           onEnded={onEnded}
         />
+        {showMask && (
+          <img
+            src={maskUrl(playbackFrame)}
+            alt=""
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-contain"
+            style={{ filter: "drop-shadow(0 0 3px rgba(244,63,94,0.9))" }}
+          />
+        )}
         <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded-full border border-white/10 bg-black/70 px-4 py-2 text-[10px] font-medium text-white/75 backdrop-blur">
-          Playing video · Pause to edit this frame
+          Playing video{showMask ? " with tracked mask" : ""} · Pause to edit this frame
         </div>
       </div>
     </div>
